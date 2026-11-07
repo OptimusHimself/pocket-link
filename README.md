@@ -48,7 +48,7 @@
 - 设备选择保存在 .runtime/devices.txt；依赖和构建产物不提交 Git。
 - Start-AudioShare.ps1 仍可启动原版扬声器工具；原版会自行缓存 ADB 到用户临时目录。
 - 扬声器此前通过网易云实机试听；本次控制台通过编译和逻辑自检。
-- 摄像头会议预览、麦克风输入音量条及实际设备释放仍待实机验收。VB-CABLE 尚未安装。
+- 本机已安装 VB-CABLE；已从 CABLE Output 测得手机麦克风信号，并在腾讯会议视频设置中确认手机实时画面。
 
 ## 开发
 
@@ -67,3 +67,11 @@ Adb 和 Audio 提供 USB 与音频协议。
 - scrcpy 5.0.1：https://github.com/Genymobile/scrcpy/releases/tag/v5.0.1 （下载包内 Apache-2.0 许可证）
 - OBS Virtual Camera：https://obsproject.com/kb/virtual-camera-guide
 - VB-CABLE：https://vb-audio.com/Cable/
+
+## 腾讯会议使用注意
+
+先在控制台启动视频会议资源，再在腾讯会议中选择 OBS Virtual Camera 和 CABLE Output。
+控制台、手机预览和本程序启动的 OBS 必须保持运行；关闭手机预览会停止当前资源。
+会议扬声器应选显示器、耳机等实际播放设备，不要选 CABLE Input 或 VB-Audio Virtual Cable，否则会议声音会进入虚拟麦克风。
+“入会开启摄像头”默认未勾选时，进入会议后需手动开启视频。
+诊断日志保存在 .runtime/session.log，仅含状态和组件日志，不录制媒体。

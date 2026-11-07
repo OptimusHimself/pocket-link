@@ -28,7 +28,7 @@ sealed class MainForm : Form {
 
     static readonly Color Ink=Color.FromArgb(29,43,64),Muted=Color.FromArgb(91,105,124),Blue=Color.FromArgb(35,91,216);
 
-    public MainForm(string root,string autoDevice) {
+    public MainForm(string root,string autoDevice,bool autoMeeting=false) {
         adb=new Adb(root);settingsFile=Path.Combine(root,".runtime","devices.txt");ReadSettings();
         Text="SoundLink · 手机资源控制台";Font=new Font("Microsoft YaHei UI",10);ForeColor=Ink;BackColor=Color.FromArgb(245,247,251);
         ClientSize=new Size(960,840);MinimumSize=new Size(920,800);StartPosition=FormStartPosition.CenterScreen;
@@ -55,7 +55,7 @@ sealed class MainForm : Form {
         logToggle.Click+=(s,e)=>{logPanel.Visible=!logPanel.Visible;logToggle.Text=logPanel.Visible?"隐藏诊断日志":"显示诊断日志";};
         retry.Interval=5000;retry.Tick+=(s,e)=>{if(retryPending && session==null && !scanning)Discover(false,()=>{Device d=device.SelectedItem as Device;if(d!=null&&d.Ready&&reconnect.Checked)StartPlayback();});};retry.Start();
         reconnect.CheckedChanged+=(s,e)=>{if(!reconnect.Checked)retryPending=false;};
-        Shown+=(s,e)=>Discover(false,()=>{if(autoDevice!=null){Select(device,autoDevice);StartPlayback();}});
+        Shown+=(s,e)=>Discover(false,()=>{if(autoDevice!=null){Select(device,autoDevice);if(autoMeeting)meetingPreset.Checked=true;StartPlayback();}});
         FormClosing+=(s,e)=>{if(session!=null){e.Cancel=true;closingRequested=true;StopPlayback();return;}retry.Stop();};
         SetState(PlaybackState.Idle,"连接手机后，选择设备并开始播放。");
     }
@@ -68,7 +68,7 @@ sealed class MainForm : Form {
         foreach(int h in new[]{38,24,46,58,58,58,48,64,52})p.RowStyles.Add(new RowStyle(SizeType.Absolute,h));
         FlowLayoutPanel presets=new FlowLayoutPanel{Dock=DockStyle.Fill};musicPreset.Text="听音乐";musicPreset.Checked=true;meetingPreset.Text="视频会议";musicPreset.AutoSize=meetingPreset.AutoSize=true;presets.Controls.Add(musicPreset);presets.Controls.Add(meetingPreset);p.Controls.Add(presets,0,0);
         musicPreset.CheckedChanged+=(s,e)=>{if(musicPreset.Checked){speakerChoice.Checked=true;cameraChoice.Checked=micChoice.Checked=false;}};
-        meetingPreset.CheckedChanged+=(s,e)=>{if(meetingPreset.Checked){speakerChoice.Checked=false;cameraChoice.Checked=micChoice.Checked=true;}};
+        meetingPreset.CheckedChanged+=(s,e)=>{if(meetingPreset.Checked){speakerChoice.Checked=false;cameraChoice.Checked=true;micChoice.Checked=HasMicOutput();}};
         p.Controls.Add(new Label{Text="USB 手机",Dock=DockStyle.Fill},0,1);ConfigureChoice(device);p.Controls.Add(device,0,2);device.SelectedIndexChanged+=(s,e)=>UpdateControls();
         speakerChoice.Checked=true;
         p.Controls.Add(ResourceRow(speakerChoice,"扬声器","电脑 → 手机，完整立体声播放",null),0,3);
@@ -85,7 +85,8 @@ sealed class MainForm : Form {
         row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,110));row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,250));
         enabled.Text=title;enabled.Dock=DockStyle.Fill;row.Controls.Add(enabled,0,0);row.Controls.Add(new Label{Text=description,Dock=DockStyle.Fill,TextAlign=ContentAlignment.MiddleLeft,ForeColor=Muted},1,0);if(extra!=null){extra.Dock=DockStyle.Fill;row.Controls.Add(extra,2,0);}return row;
     }
-    void RefreshVirtualOutputs(){micOutput.Items.Clear();foreach(WaveDevice output in WaveOutput.VirtualDevices())micOutput.Items.Add(output);if(micOutput.Items.Count>0)micOutput.SelectedIndex=0;else micOutput.Items.Add("未配置虚拟麦克风");}
+    bool HasMicOutput(){return micOutput.Items.Count>0&&micOutput.Items[0] is WaveDevice;}
+    void RefreshVirtualOutputs(){micOutput.Items.Clear();foreach(WaveDevice output in WaveOutput.VirtualDevices())micOutput.Items.Add(output);if(micOutput.Items.Count==0){micOutput.Items.Add("需安装 VB-CABLE，点击下方配置");micChoice.Checked=false;}micOutput.SelectedIndex=0;UpdateControls();}
     void ConfigureMicrophone(){
         if(session!=null){MessageBox.Show(this,"请先停止连接，再配置会议麦克风。");return;}
         var info=new System.Diagnostics.ProcessStartInfo("powershell.exe","-NoProfile -File "+Adb.Q(Path.Combine(adb.Root,"Setup-Resources.ps1"))+" -InstallMicrophone"){UseShellExecute=true};System.Diagnostics.Process.Start(info);
@@ -96,12 +97,14 @@ sealed class MainForm : Form {
         if(IsDisposed)return;
         if(details.TextLength>48000)details.Text=details.Text.Substring(details.TextLength-24000);
         details.AppendText(DateTime.Now.ToString("HH:mm:ss")+" "+message+Environment.NewLine);
+        try{Directory.CreateDirectory(Path.GetDirectoryName(settingsFile));File.AppendAllText(Path.Combine(Path.GetDirectoryName(settingsFile),"session.log"),DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss ")+message+Environment.NewLine);}catch(IOException){}catch(UnauthorizedAccessException){}
 
     }
     void SetState(PlaybackState value,string message) {state=value;statusTitle.Text=value==PlaybackState.Idle?"未连接":value==PlaybackState.Connecting?"正在连接":value==PlaybackState.Playing?"所选资源已启动":value==PlaybackState.Stopping?"正在断开连接":"连接失败";statusTitle.ForeColor=value==PlaybackState.Failed?Color.Firebrick:value==PlaybackState.Playing?Color.FromArgb(20,112,72):Ink;statusHint.Text=message;UpdateControls();}
     void UpdateControls() {
         bool active=session!=null,busy=active||scanning;
         device.Enabled=musicPreset.Enabled=meetingPreset.Enabled=speakerChoice.Enabled=cameraChoice.Enabled=micChoice.Enabled=facing.Enabled=micOutput.Enabled=!busy;
+        micChoice.Enabled=micOutput.Enabled=!busy&&HasMicOutput();
         refresh.Enabled=repair.Enabled=!busy;
         start.Text=active?(state==PlaybackState.Stopping?"正在停止…":"断开连接"):"启动所选资源";
         Device d=device.SelectedItem as Device;
@@ -129,6 +132,7 @@ sealed class MainForm : Form {
         try{options.Validate();}catch(Exception e){SetState(PlaybackState.Failed,e.Message);return;}
         stopRequested=retryPending=false;lastDevice=selected.Serial;SaveSettings();
         ResourceSession current=new ResourceSession(adb,Log);session=current;
+        Log("启动资源：扬声器="+options.Speaker+"，摄像头="+options.Camera+"，麦克风="+options.Microphone);
         SetState(PlaybackState.Connecting,"正在启动勾选的手机资源，未勾选的资源保持关闭。");
         current.Start(options,()=>Post(()=>{if(session==current&&state!=PlaybackState.Stopping)SetState(PlaybackState.Playing,options.Camera||options.Microphone?"会议软件请选择 OBS Virtual Camera / CABLE Output，并检查会议预览和麦克风音量条。":"请在电脑播放网易云音乐，手机音量控制响度。");}),error=>Post(()=>{
             if(session!=current)return;session=null;if(error!=null){Log(error);SetState(PlaybackState.Failed,error);}else SetState(PlaybackState.Idle,"所选资源已关闭。");

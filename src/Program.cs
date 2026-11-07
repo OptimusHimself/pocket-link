@@ -15,7 +15,8 @@ static class Program {
         if(args.Length>0 && args[0]=="--self-test") {SelfTest();return 0;}
         string root=Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,".."));
         Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
-        Application.Run(new MainForm(root,args.Length==1?args[0]:null));return 0;
+        bool meeting=args.Length==2&&args[0]=="--meeting";
+        Application.Run(new MainForm(root,meeting?args[1]:args.Length==1?args[0]:null,meeting));return 0;
     }
     static void SelfTest() {
         try { Pcm.ReadExact(new MemoryStream(new byte[3]),new byte[4]);throw new Exception("Truncated stream accepted"); }catch(EndOfStreamException){}
@@ -30,6 +31,8 @@ static class Program {
         if(!rejected)throw new Exception("Missing virtual microphone accepted");
         rejected=false;try{new ResourceOptions{Serial="phone"}.Validate();}catch(InvalidOperationException){rejected=true;}
         if(!rejected)throw new Exception("Empty resource selection accepted");
+        if(!WaveOutput.IsCableOutput("扬声器 (VB-Audio Virtual Cable)")||!WaveOutput.IsCableOutput("CABLE Input (VB-Audio Virtual Cab")||WaveOutput.IsCableOutput("CABLE In 16 Ch (VB-Audio Virtual)"))throw new Exception("Localized VB-CABLE 46 endpoint detection failed");
+        string logfile=Path.GetTempFileName();try{using(var writer=new FileStream(logfile,FileMode.Open,FileAccess.Write,FileShare.ReadWrite)){byte[] marker=Encoding.UTF8.GetBytes("==== Virtual Camera Start");writer.Write(marker,0,marker.Length);writer.Flush();if(!CameraBridge.ReadSharedLog(logfile).Contains("Virtual Camera Start"))throw new Exception("Active OBS log could not be read");}}finally{File.Delete(logfile);}
         string scene=CameraBridge.SceneJson();if(!scene.Contains("SoundLinkCamera")||!scene.Contains("\"capture_audio\":false"))throw new Exception("Camera scene must not capture audio");
         Console.WriteLine("PASS: unchanged speaker PCM, disconnect, device authorization, independent resource selection, microphone dependency, camera audio isolation");
     }
