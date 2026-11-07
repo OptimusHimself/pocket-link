@@ -13,6 +13,7 @@ using System.Windows.Forms;
 static class Program {
     [STAThread] static int Main(string[] args) {
         if(args.Length>0 && args[0]=="--self-test") {SelfTest();return 0;}
+        if(args.Length==1&&args[0]=="--audio-route"){Console.WriteLine(AudioRouting.DefaultPlayback());return 0;}
         if(args.Length==1&&(args[0]=="--exit"||args[0]=="--hide"||args[0]=="--show"))return SingleInstance.Signal(args[0].Substring(2))?0:1;
         string root=Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,".."));
         Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);

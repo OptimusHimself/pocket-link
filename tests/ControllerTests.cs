@@ -4,6 +4,7 @@ using System.Collections.Generic;
 static class ControllerTests {
     sealed class Job:IResourceJob {public ResourceOptions Options;public int Stops;Action<string> ended;public void Start(ResourceOptions options,Action ready,Action<string> finished){Options=options;ended=finished;ready();}public void Stop(){Stops++;}public void Finish(string error=null){ended(error);}}
     public static void Run(){
+        if(!AudioRouting.IsMicrophoneBus("扬声器 (VB-Audio Virtual Cable)")||!AudioRouting.IsMicrophoneBus("CABLE Input")||AudioRouting.IsMicrophoneBus("1 - X71QN (AMD High Definition Audio Device)"))throw new Exception("Microphone bus mistaken for program audio output");
         var jobs=new List<Job>();var controller=new ResourceController(()=>{var job=new Job();jobs.Add(job);return job;},action=>action());
         var speaker=new ResourceOptions{Serial="phone",Speaker=true};var camera=new ResourceOptions{Serial="phone",Camera=true};var mic=new ResourceOptions{Serial="phone",Microphone=true,MicrophoneOutput=1};
         controller.Set(PhoneResource.Speaker,true,speaker);controller.Set(PhoneResource.Camera,true,camera);

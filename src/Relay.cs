@@ -31,6 +31,8 @@ sealed class Relay {
         lock(sockets) sockets.Add(c); return c;
     }
     void Run(string device) {
+        AudioRouting.EnsureSpeakerIsolation();
+        log("扬声器采集输出："+AudioRouting.DefaultPlayback()+"；麦克风虚拟通道不作为扬声器来源。");
         log("正在准备手机播放组件…");
         serial=device;TcpListener output=Listen();
         if(stopping) return;

@@ -9,6 +9,7 @@ sealed class MicrophoneBridge:IDisposable {
     TcpListener listener;TcpClient input;Process server;volatile bool stopped;string serial;bool mapped;
     public MicrophoneBridge(Adb adb,Action<string> log){this.adb=adb;this.log=log;}
     public void Run(string device,int outputId,Action ready){
+        AudioRouting.EnsureSpeakerIsolation();
         serial=device;string prefix="-s "+Adb.Q(device)+" ";
         int sdk;if(!Int32.TryParse(adb.Run(prefix+"shell getprop ro.build.version.sdk").Trim(),out sdk)||sdk<30)throw new IOException("手机麦克风转发需要 Android 11 或更新版本。");
         listener=new TcpListener(IPAddress.Loopback,0);listener.Start();
