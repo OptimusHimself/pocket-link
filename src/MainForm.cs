@@ -9,7 +9,7 @@ enum PlaybackState { Idle, Connecting, Playing, Stopping, Failed }
 
 sealed class MainForm : Form {
     readonly Adb adb;
-    readonly RadioButton musicPreset=new RadioButton(),meetingPreset=new RadioButton();
+    readonly CheckBox mirrorChoice=new CheckBox();bool savedMirror;
     readonly CheckBox speakerChoice=new CheckBox(),cameraChoice=new CheckBox(),micChoice=new CheckBox();
     readonly ComboBox facing=new ComboBox(),orientation=new ComboBox(),micOutput=new ComboBox();
     static readonly int[] Rotations={270,90,0,180};int savedRotation=270,savedFacing;
@@ -29,7 +29,7 @@ sealed class MainForm : Form {
 
     static readonly Color Ink=Color.FromArgb(29,43,64),Muted=Color.FromArgb(91,105,124),Blue=Color.FromArgb(35,91,216);
 
-    public MainForm(string root,string autoDevice,bool autoMeeting=false) {
+    public MainForm(string root,string autoDevice,bool autoMeeting=false,bool cameraOnly=false) {
         adb=new Adb(root);controller=new ResourceController(()=>new ResourceSession(adb,Log),Post);watcher=new DeviceWatcher(adb);settingsFile=Path.Combine(root,".runtime","devices.txt");ReadSettings();
         Text="PocketLink · 手机资源控制台";Font=new Font("Microsoft YaHei UI",10);ForeColor=Ink;BackColor=Color.FromArgb(245,247,251);
         ClientSize=new Size(960,840);MinimumSize=new Size(920,800);StartPosition=FormStartPosition.CenterScreen;
@@ -59,7 +59,7 @@ sealed class MainForm : Form {
         controller.Changed+=()=>{UpdateControls();UpdateTray();TryResumeSpeaker();FinishExit();};
         controller.Error+=message=>{Log(message);statusTitle.Text="资源连接失败";statusHint.Text=message;};
         InitializeTray();
-        Shown+=(s,e)=>{Discover(false,()=>{try{watcher.Start();}catch(Exception error){Log(error.Message);}if(autoDevice!=null){Select(device,autoDevice);if(autoMeeting)ApplyPreset(true);else StartPlayback();}});};
+        Shown+=(s,e)=>{Discover(false,()=>{try{watcher.Start();}catch(Exception error){Log(error.Message);}if(autoDevice!=null){Select(device,autoDevice);suppress=true;cameraChoice.Checked=autoMeeting;micChoice.Checked=autoMeeting&&!cameraOnly;speakerChoice.Checked=!autoMeeting;suppress=false;StartPlayback();}});};
         FormClosing+=(s,e)=>{if(e.CloseReason==CloseReason.UserClosing&&!exitRequested){e.Cancel=true;HideToTray();return;}if(controller.Busy){e.Cancel=true;RequestExit();return;}retry.Stop();watcher.Dispose();if(tray!=null){tray.Visible=false;tray.Dispose();}};
         SetState(PlaybackState.Idle,"连接手机后，选择设备并开始播放。");
     }
@@ -70,11 +70,9 @@ sealed class MainForm : Form {
     void BuildPlayback(Panel page) {
         TableLayoutPanel p=PageLayout(page,9);
         foreach(int h in new[]{38,24,46,58,58,58,48,64,52})p.RowStyles.Add(new RowStyle(SizeType.Absolute,h));
-        FlowLayoutPanel presets=new FlowLayoutPanel{Dock=DockStyle.Fill};musicPreset.Text="听音乐";musicPreset.Checked=true;meetingPreset.Text="视频会议";musicPreset.AutoSize=meetingPreset.AutoSize=true;presets.Controls.Add(musicPreset);presets.Controls.Add(meetingPreset);p.Controls.Add(presets,0,0);
-        musicPreset.Click+=(s,e)=>ApplyPreset(false);
-        meetingPreset.Click+=(s,e)=>ApplyPreset(true);
+        p.Controls.Add(new Label{Text="独立控制手机资源；摄像头方向和镜像可在运行中调整。",Dock=DockStyle.Fill},0,0);
         p.Controls.Add(new Label{Text="USB 手机",Dock=DockStyle.Fill},0,1);ConfigureChoice(device);p.Controls.Add(device,0,2);device.SelectedIndexChanged+=(s,e)=>UpdateControls();
-        speakerChoice.Checked=true;
+        speakerChoice.Checked=false;
         p.Controls.Add(ResourceRow(speakerChoice,"扬声器","电脑 → 手机，完整立体声播放",null),0,3);
         facing.DropDownStyle=ComboBoxStyle.DropDownList;facing.Items.AddRange(new object[]{"前置摄像头","后置摄像头"});facing.SelectedIndex=savedFacing;facing.Width=200;
         orientation.DropDownStyle=ComboBoxStyle.DropDownList;orientation.Items.AddRange(new object[]{"竖持 · 270°","竖持反向 · 90°","横持 · 0°","横持反向 · 180°"});orientation.SelectedIndex=Array.IndexOf(Rotations,savedRotation);
@@ -82,8 +80,8 @@ sealed class MainForm : Form {
         p.Controls.Add(ResourceRow(cameraChoice,"摄像头","手机 → 电脑，默认竖持；会议选 OBS Virtual Camera",cameraControls),0,4);
         micOutput.DropDownStyle=ComboBoxStyle.DropDownList;micOutput.Width=250;RefreshVirtualOutputs();
         p.Controls.Add(ResourceRow(micChoice,"麦克风","手机 → 电脑，会议中选择 CABLE Output",micOutput),0,5);
-        FlowLayoutPanel extras=new FlowLayoutPanel{Dock=DockStyle.Fill};Button setup=new Button{Text="配置会议麦克风",AutoSize=true};setup.Click+=(s,e)=>ConfigureMicrophone();extras.Controls.Add(setup);reconnect.Text="听歌意外断开后自动重连";reconnect.AutoSize=true;extras.Controls.Add(reconnect);p.Controls.Add(extras,0,6);
-        hint.Text="听音乐仅开启扬声器；会议可独立勾选摄像头和麦克风。摄像头、麦克风仅在点击启动后采集。";hint.Dock=DockStyle.Fill;hint.ForeColor=Muted;p.Controls.Add(hint,0,7);
+        FlowLayoutPanel extras=new FlowLayoutPanel{Dock=DockStyle.Fill};Button setup=new Button{Text="配置会议麦克风",AutoSize=true};setup.Click+=(s,e)=>ConfigureMicrophone();extras.Controls.Add(setup);mirrorChoice.Text="水平镜像";mirrorChoice.Checked=savedMirror;mirrorChoice.AutoSize=true;extras.Controls.Add(mirrorChoice);Button preview=new Button{Text="打开摄像头预览",AutoSize=true};preview.Click+=(s,e)=>{string url=controller.CameraPreviewUrl;if(url!=null)System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url){UseShellExecute=true});};extras.Controls.Add(preview);orientation.SelectedIndexChanged+=(s,e)=>UpdateCameraTransform();mirrorChoice.CheckedChanged+=(s,e)=>UpdateCameraTransform();reconnect.Text="扬声器断开后自动恢复";reconnect.AutoSize=true;extras.Controls.Add(reconnect);p.Controls.Add(extras,0,6);
+        hint.Text="独立开启所需资源。预览可随时关闭，旋转与镜像实时作用于会议输出。";hint.Dock=DockStyle.Fill;hint.ForeColor=Muted;p.Controls.Add(hint,0,7);
                 ConfigureButton(start,"应用资源选择",true);p.Controls.Add(start,0,8);start.Click+=(s,e)=>StartPlayback();
         speakerChoice.CheckedChanged+=(s,e)=>ResourceChoiceChanged();cameraChoice.CheckedChanged+=(s,e)=>ResourceChoiceChanged();micChoice.CheckedChanged+=(s,e)=>ResourceChoiceChanged();
         Button stop=new Button{Text="关闭所有资源",AutoSize=true};stop.Click+=(s,e)=>StopPlayback();extras.Controls.Add(stop);
@@ -112,9 +110,9 @@ sealed class MainForm : Form {
     void UpdateControls(){
         bool busy=controller!=null&&controller.Busy;
         device.Enabled=!busy&&!scanning;refresh.Enabled=repair.Enabled=!scanning;
-        musicPreset.Enabled=meetingPreset.Enabled=speakerChoice.Enabled=cameraChoice.Enabled=true;
+        speakerChoice.Enabled=cameraChoice.Enabled=true;
         micChoice.Enabled=HasMicOutput()||(controller!=null&&controller.Active(PhoneResource.Microphone));
-        facing.Enabled=orientation.Enabled=controller==null||!controller.Active(PhoneResource.Camera);
+        facing.Enabled=controller==null||!controller.Active(PhoneResource.Camera);orientation.Enabled=mirrorChoice.Enabled=true;
         micOutput.Enabled=HasMicOutput()&&(controller==null||!controller.Active(PhoneResource.Microphone));
         Device selected=device.SelectedItem as Device;start.Enabled=!scanning&&selected!=null&&selected.Ready;
         start.Text="应用资源选择";
@@ -134,23 +132,24 @@ sealed class MainForm : Form {
     static string Serial(ComboBox box) {Device d=box.SelectedItem as Device;return d==null?null:d.Serial;}
     static void Select(ComboBox box,string id) {foreach(Device d in box.Items)if(d.Serial==id){box.SelectedItem=d;return;}}
     void Fill(ComboBox box,string previous,int fallback) {box.Items.Clear();foreach(Device d in devices)box.Items.Add(d);Select(box,previous);if(box.SelectedIndex<0&&devices.Count>fallback)box.SelectedIndex=fallback;}
-    ResourceOptions Options(Device selected,PhoneResource resource){WaveDevice target=micOutput.SelectedItem as WaveDevice;return new ResourceOptions{Serial=selected.Serial,Speaker=resource==PhoneResource.Speaker,Camera=resource==PhoneResource.Camera,Microphone=resource==PhoneResource.Microphone,FrontCamera=facing.SelectedIndex==0,CameraRotation=Rotations[orientation.SelectedIndex],MicrophoneOutput=target==null?-1:target.Id};}
+    ResourceOptions Options(Device selected,PhoneResource resource){WaveDevice target=micOutput.SelectedItem as WaveDevice;return new ResourceOptions{Serial=selected.Serial,Speaker=resource==PhoneResource.Speaker,Camera=resource==PhoneResource.Camera,Microphone=resource==PhoneResource.Microphone,FrontCamera=facing.SelectedIndex==0,CameraRotation=Rotations[orientation.SelectedIndex],CameraMirror=mirrorChoice.Checked,MicrophoneOutput=target==null?-1:target.Id,MicrophoneOutputName=target==null?null:target.Name};}
     void StartPlayback(){
         if(exitRequested||scanning)return;Device selected=device.SelectedItem as Device;
         if(selected==null||!selected.Ready){SetState(PlaybackState.Failed,"请选择已授权的手机。");return;}
-        started=true;lastDevice=selected.Serial;savedRotation=Rotations[orientation.SelectedIndex];savedFacing=facing.SelectedIndex;SaveSettings();
+        started=true;lastDevice=selected.Serial;savedRotation=Rotations[orientation.SelectedIndex];savedFacing=facing.SelectedIndex;savedMirror=mirrorChoice.Checked;SaveSettings();
         foreach(PhoneResource key in Enum.GetValues(typeof(PhoneResource))){bool enabled=key==PhoneResource.Speaker?speakerChoice.Checked:key==PhoneResource.Camera?cameraChoice.Checked:micChoice.Checked;ResourceOptions options=Options(selected,key);if(enabled){try{options.Validate();}catch(Exception error){Log(error.Message);continue;}}controller.Set(key,enabled,options);}
         UpdateControls();UpdateTray();
     }
-    void ResourceChoiceChanged(){if(!suppress&&started)StartPlayback();}
-    void ApplyPreset(bool meeting){suppress=true;speakerChoice.Checked=!meeting;cameraChoice.Checked=meeting;micChoice.Checked=meeting&&HasMicOutput();suppress=false;StartPlayback();}
+    void ResourceChoiceChanged(){if(!suppress)StartPlayback();}
+
+    void UpdateCameraTransform(){if(orientation.SelectedIndex<0)return;savedRotation=Rotations[orientation.SelectedIndex];savedMirror=mirrorChoice.Checked;controller.SetCameraTransform(savedRotation,savedMirror);SaveSettings();}
     void StopPlayback(){resumeSerial=null;suppress=true;speakerChoice.Checked=cameraChoice.Checked=micChoice.Checked=false;suppress=false;controller.StopAll();UpdateControls();UpdateTray();}
     void CheckDevicePresence(string previous,bool previouslyReady){
         Device present=devices.Find(x=>x.Serial==previous&&x.Ready);
         if(DevicePresence.MustRelease(previouslyReady,present!=null,controller.Busy)){if(started&&speakerChoice.Checked&&reconnect.Checked)resumeSerial=previous;suppress=true;speakerChoice.Checked=cameraChoice.Checked=micChoice.Checked=false;suppress=false;controller.StopAll();Log("手机已断开，释放采集资源并进入低耗待机。");}
         TryResumeSpeaker();
     }
-    void TryResumeSpeaker(){if(exitRequested||resumeSerial==null||!reconnect.Checked||controller.Active(PhoneResource.Speaker))return;Device found=devices.Find(x=>DevicePresence.CanResumeSpeaker(resumeSerial,x.Serial,x.Ready,reconnect.Checked));if(found==null)return;resumeSerial=null;Select(device,found.Serial);suppress=true;speakerChoice.Checked=true;suppress=false;controller.Set(PhoneResource.Speaker,true,Options(found,PhoneResource.Speaker));Log("原手机已接入，按设置恢复扬声器。摄像头和麦克风保持关闭。");}
+    void TryResumeSpeaker(){if(exitRequested||resumeSerial==null||!reconnect.Checked||controller.Active(PhoneResource.Speaker))return;Device found=devices.Find(x=>DevicePresence.CanResumeSpeaker(resumeSerial,x.Serial,x.Ready,reconnect.Checked));if(found==null)return;resumeSerial=null;Select(device,found.Serial);suppress=true;speakerChoice.Checked=false;suppress=false;controller.Set(PhoneResource.Speaker,true,Options(found,PhoneResource.Speaker));Log("原手机已接入，按设置恢复扬声器。摄像头和麦克风保持关闭。");}
     void ScheduleDeviceScan(){if(exitRequested)return;retry.Stop();retry.Start();}
     protected override void WndProc(ref Message message){base.WndProc(ref message);if(message.Msg==0x219&&retry!=null)ScheduleDeviceScan();}
     void InitializeTray(){
@@ -165,6 +164,6 @@ sealed class MainForm : Form {
     public void HideToTray(){if(InvokeRequired){Post(HideToTray);return;}Hide();if(firstHide&&tray!=null){firstHide=false;tray.ShowBalloonTip(4000,"PocketLink 已隐藏到托盘",controller.Busy?"当前资源继续运行，右键托盘图标可关闭资源或退出。":"程序待命中，右键托盘图标可退出。",ToolTipIcon.Info);}}
     public void RequestExit(){if(InvokeRequired){Post(RequestExit);return;}if(exitRequested)return;exitRequested=true;retry.Stop();resumeSerial=null;controller.StopAll();FinishExit();}
     void FinishExit(){if(!exitRequested||controller.Busy||exiting)return;exiting=true;watcher.Dispose();ThreadPool.QueueUserWorkItem(_=>{try{adb.Run("kill-server");}catch{}Post(()=>Close());});}
-    void ReadSettings() {try{string[] values=File.ReadAllLines(settingsFile);if(values.Length>0)lastDevice=values[0];int rotation;if(values.Length>1&&Int32.TryParse(values[1],out rotation)&&Array.IndexOf(Rotations,rotation)>=0)savedRotation=rotation;int lens;if(values.Length>2&&Int32.TryParse(values[2],out lens)&&(lens==0||lens==1))savedFacing=lens;}catch(IOException){}catch(UnauthorizedAccessException){}}
-    void SaveSettings() {try{Directory.CreateDirectory(Path.GetDirectoryName(settingsFile));File.WriteAllLines(settingsFile,new string[]{lastDevice??"",savedRotation.ToString(),savedFacing.ToString()});}catch(Exception e){Log("无法保存设备选择："+e.Message);}}
+    void ReadSettings() {try{string[] values=File.ReadAllLines(settingsFile);if(values.Length>0)lastDevice=values[0];int rotation;if(values.Length>1&&Int32.TryParse(values[1],out rotation)&&Array.IndexOf(Rotations,rotation)>=0)savedRotation=rotation;int lens;if(values.Length>2&&Int32.TryParse(values[2],out lens)&&(lens==0||lens==1))savedFacing=lens;if(values.Length>3)Boolean.TryParse(values[3],out savedMirror);}catch(IOException){}catch(UnauthorizedAccessException){}}
+    void SaveSettings() {try{Directory.CreateDirectory(Path.GetDirectoryName(settingsFile));File.WriteAllLines(settingsFile,new string[]{lastDevice??"",savedRotation.ToString(),savedFacing.ToString(),savedMirror.ToString()});}catch(Exception e){Log("无法保存设备选择："+e.Message);}}
 }

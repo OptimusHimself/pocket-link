@@ -3,6 +3,7 @@ using System.Collections.Generic;
 
 enum PhoneResource { Speaker, Camera, Microphone }
 interface IResourceJob {void Start(ResourceOptions options,Action ready,Action<string> ended);void Stop();}
+interface ICameraControls {void SetTransform(int rotation,bool mirror);string PreviewUrl{get;}}
 sealed class ResourceController {
     sealed class Slot {public IResourceJob Job;public ResourceOptions Options;public bool Wanted,Stopping;public string State="关闭";}
     readonly Dictionary<PhoneResource,Slot> slots=new Dictionary<PhoneResource,Slot>();readonly Func<IResourceJob> factory;readonly Action<Action> dispatch;
@@ -11,6 +12,8 @@ sealed class ResourceController {
     public bool Busy{get{foreach(var s in slots.Values)if(s.Job!=null)return true;return false;}}
     public bool Active(PhoneResource key){return slots[key].Job!=null;}
     public string Status(PhoneResource key){return slots[key].State;}
+    public void SetCameraTransform(int rotation,bool mirror){var slot=slots[PhoneResource.Camera];if(slot.Options!=null){slot.Options.CameraRotation=rotation;slot.Options.CameraMirror=mirror;}var controls=slot.Job as ICameraControls;if(controls!=null)controls.SetTransform(rotation,mirror);}
+    public string CameraPreviewUrl{get{var controls=slots[PhoneResource.Camera].Job as ICameraControls;return controls==null?null:controls.PreviewUrl;}}
     public void Set(PhoneResource key,bool enabled,ResourceOptions options){var s=slots[key];s.Wanted=enabled;if(options!=null)s.Options=options;if(!enabled){if(s.Job!=null&&!s.Stopping){s.Stopping=true;s.State="停止中";s.Job.Stop();Notify();}return;}if(s.Job==null)Start(key,s);}
     void Start(PhoneResource key,Slot s){
         var job=factory();s.Job=job;s.Stopping=false;s.State="连接中";Notify();

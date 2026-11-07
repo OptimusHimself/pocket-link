@@ -8,8 +8,10 @@ sealed class MicrophoneBridge:IDisposable {
     readonly Adb adb;readonly Action<string> log;readonly string socket="scrcpy_"+Process.GetCurrentProcess().Id.ToString("x8");
     TcpListener listener;TcpClient input;Process server;volatile bool stopped;string serial;bool mapped;
     public MicrophoneBridge(Adb adb,Action<string> log){this.adb=adb;this.log=log;}
-    public void Run(string device,int outputId,Action ready){
+    public void Run(string device,int outputId,Action ready,string outputName=null){
         AudioRouting.EnsureSpeakerIsolation();
+        using(WaveOutput output=new WaveOutput(outputId,outputName)){
+        log("麦克风输出："+output.Device.Name+"（当前编号 "+output.Device.Id+"）");
         serial=device;string prefix="-s "+Adb.Q(device)+" ";
         int sdk;if(!Int32.TryParse(adb.Run(prefix+"shell getprop ro.build.version.sdk").Trim(),out sdk)||sdk<30)throw new IOException("手机麦克风转发需要 Android 11 或更新版本。");
         listener=new TcpListener(IPAddress.Loopback,0);listener.Start();
@@ -20,7 +22,6 @@ sealed class MicrophoneBridge:IDisposable {
         server.OutputDataReceived+=(s,e)=>{if(e.Data!=null)log(e.Data);};server.ErrorDataReceived+=(s,e)=>{if(e.Data!=null)log(e.Data);};server.BeginOutputReadLine();server.BeginErrorReadLine();
         var pending=listener.BeginAcceptTcpClient(null,null);using(var wait=pending.AsyncWaitHandle){if(!wait.WaitOne(15000))throw new IOException("手机麦克风连接超时，请解锁手机后重试。");}
         input=listener.EndAcceptTcpClient(pending);input.ReceiveTimeout=15000;
-        using(WaveOutput output=new WaveOutput(outputId)){
             byte[] pcm=new byte[WaveOutput.BlockBytes];Pcm.ReadExact(input.GetStream(),pcm);ready();
             do{output.Write(pcm,()=>stopped);Pcm.ReadExact(input.GetStream(),pcm);}while(!stopped);
         }
