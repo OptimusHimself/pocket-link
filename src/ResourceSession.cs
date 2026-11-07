@@ -26,7 +26,7 @@ sealed class ResourceSession : IResourceJob,ICameraControls {
                 if(stopping)return;
                 if(options.Microphone){mic=new MicrophoneBridge(adb,log);micThread=new Thread(()=>{try{mic.Run(options.Serial,options.MicrophoneOutput,()=>microphoneReady.Set(),options.MicrophoneOutputName);}catch(Exception e){micFailure=e;}finally{mic.Dispose();micEnded=true;microphoneReady.Set();}});micThread.IsBackground=true;micThread.Start();Wait(microphoneReady,20000);if(micEnded)throw new IOException(micFailure==null?"麦克风已断开":micFailure.Message);}
                 if(stopping)return;ready();
-                while(!stopping){if(options.Speaker&&speakerEnded)throw new IOException("扬声器连接已断开");if(options.Camera&&!camera.Alive)throw new IOException("摄像头预览或 OBS 已关闭，请重新连接并保留预览窗口。");if(options.Microphone&&micEnded)throw new IOException(micFailure==null?"麦克风连接已断开":micFailure.Message);Thread.Sleep(200);}
+                while(!stopping){if(options.Speaker&&speakerEnded)throw new IOException("扬声器连接已断开");if(options.Camera&&!camera.Alive)throw new IOException("摄像头后台或 OBS 已退出，请重新勾选摄像头。");if(options.Microphone&&micEnded)throw new IOException(micFailure==null?"麦克风连接已断开":micFailure.Message);Thread.Sleep(200);}
             }catch(OperationCanceledException){}catch(Exception e){if(!stopping)failure=e.Message;}
             finally{Stop();if(camera!=null)camera.Dispose();if(micThread!=null)micThread.Join(20000);if(speaker!=null)while(!speakerEnded)Thread.Sleep(20);speakerReady.Dispose();microphoneReady.Dispose();ended(failure);}
         });thread.IsBackground=true;thread.SetApartmentState(ApartmentState.MTA);thread.Start();

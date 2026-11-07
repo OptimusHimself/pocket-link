@@ -29,7 +29,7 @@ sealed class WaveOutput:IDisposable {
         if(matches.Count==1)return matches[0];
         if(String.IsNullOrEmpty(name)){var previous=cables.Find(x=>x.Id==previousId);if(previous!=null)return previous;}
         if(cables.Count==1)return cables[0];
-        throw new InvalidOperationException(cables.Count==0?"未找到 CABLE Input，请检查 VB-CABLE 是否启用，再刷新设备。":"虚拟音频线已变化，请刷新设备并重新选择麦克风输出。");
+        throw new InvalidOperationException(cables.Count==0?"未找到 CABLE Input，请检查 VB-CABLE 是否启用，再点击“重新连接”。":"虚拟音频线已变化，请点击“重新连接”并重新选择麦克风输出。");
     }
     public WaveDevice Device{get;private set;}
     public WaveOutput(int id,string name=null){Device=ResolveDevice(VirtualDevices(),id,name);Format f=new Format{tag=1,channels=2,rate=48000,bytes=192000,align=4,bits=16};Check(waveOutOpen(out handle,(uint)Device.Id,ref f,IntPtr.Zero,IntPtr.Zero,0));try{for(int i=0;i<4;i++){data[i]=Marshal.AllocHGlobal(BlockBytes);headers[i]=Marshal.AllocHGlobal((int)size);Marshal.StructureToPtr(new Header{data=data[i],length=BlockBytes},headers[i],false);Check(waveOutPrepareHeader(handle,headers[i],size));}}catch{Dispose();throw;}}

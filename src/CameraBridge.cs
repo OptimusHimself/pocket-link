@@ -15,6 +15,7 @@ sealed class CameraBridge:IDisposable {
     internal static string OrientationArguments(int rotation){CameraFrameHost.ValidateRotation(rotation);return "output-rotation="+rotation;}
     public void SetTransform(int rotation,bool mirror){CameraFrameHost.ValidateRotation(rotation);if(frames!=null)frames.Transform(rotation,mirror);}
     public void Start(string device,bool front,int rotation=270,bool mirror=false){
+        log("正在启用"+(front?"前置":"后置")+"摄像头…");
         serial=device;string obsExe=FindObs();if(obsExe==null)throw new IOException("未找到 OBS Studio。");string ffmpeg=FindDecoder();frames=new CameraFrameHost();frames.Transform(rotation,mirror);
         listener=new TcpListener(IPAddress.Loopback,0);listener.Start();string id=(0x10000000|Process.GetCurrentProcess().Id).ToString("x8");socket="scrcpy_"+id;string prefix="-s "+Adb.Q(device)+" ";
         adb.Run(prefix+"push "+Adb.Q(Path.Combine(adb.Root,"tools/scrcpy-win64-v5.0.1/scrcpy-server"))+" /data/local/tmp/pocketlink-camera-server");if(stopping)throw new OperationCanceledException();

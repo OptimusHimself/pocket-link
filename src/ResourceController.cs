@@ -14,7 +14,7 @@ sealed class ResourceController {
     public string Status(PhoneResource key){return slots[key].State;}
     public void SetCameraTransform(int rotation,bool mirror){var slot=slots[PhoneResource.Camera];if(slot.Options!=null){slot.Options.CameraRotation=rotation;slot.Options.CameraMirror=mirror;}var controls=slot.Job as ICameraControls;if(controls!=null)controls.SetTransform(rotation,mirror);}
     public string CameraPreviewUrl{get{var controls=slots[PhoneResource.Camera].Job as ICameraControls;return controls==null?null:controls.PreviewUrl;}}
-    public void Set(PhoneResource key,bool enabled,ResourceOptions options){var s=slots[key];s.Wanted=enabled;if(options!=null)s.Options=options;if(!enabled){if(s.Job!=null&&!s.Stopping){s.Stopping=true;s.State="停止中";s.Job.Stop();Notify();}return;}if(s.Job==null)Start(key,s);}
+    public void Set(PhoneResource key,bool enabled,ResourceOptions options){var s=slots[key];bool switchCamera=enabled&&key==PhoneResource.Camera&&options!=null&&s.Options!=null&&options.FrontCamera!=s.Options.FrontCamera;s.Wanted=enabled;if(options!=null)s.Options=options;if(!enabled||switchCamera){if(s.Job!=null&&!s.Stopping){s.Stopping=true;s.State=switchCamera?"切换镜头中":"停止中";s.Job.Stop();Notify();}if(!enabled)return;}if(s.Job==null)Start(key,s);}
     void Start(PhoneResource key,Slot s){
         var job=factory();s.Job=job;s.Stopping=false;s.State="连接中";Notify();
         job.Start(s.Options,()=>dispatch(()=>{if(s.Job==job&&!s.Stopping){s.State="运行中";Notify();}}),error=>dispatch(()=>{
