@@ -13,11 +13,15 @@ sealed class CameraBridge : IDisposable {
     [DllImport("user32.dll",CharSet=CharSet.Unicode)]static extern int GetClassName(IntPtr window,StringBuilder name,int count);
     public CameraBridge(Adb adb,Action<string> log){this.adb=adb;this.log=log;}
     public static string FindObs(){foreach(string path in new[]{@"D:\obs-studio\bin\64bit\obs64.exe",Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),"obs-studio/bin/64bit/obs64.exe")})if(File.Exists(path))return path;return null;}
-    public void Start(string serial,bool front){
+    internal static string OrientationArguments(int rotation){
+        if(rotation!=0&&rotation!=90&&rotation!=180&&rotation!=270)throw new ArgumentOutOfRangeException("rotation");
+        return " --display-orientation="+rotation+((rotation==90||rotation==270)?" --window-width=360 --window-height=640":" --window-width=640 --window-height=360");
+    }
+    public void Start(string serial,bool front,int rotation=90){
         string exe=Path.Combine(adb.Root,"tools/scrcpy-win64-v5.0.1/scrcpy.exe"),obsExe=FindObs();
         if(!File.Exists(exe))throw new IOException("缺少摄像头组件，请运行 Setup-Resources.ps1。");
         if(obsExe==null)throw new IOException("未找到 OBS Studio。请先安装 OBS 及其 Virtual Camera。");
-        var p=new ProcessStartInfo(exe,"--serial "+Adb.Q(serial)+" --video-source=camera --camera-facing="+(front?"front":"back")+" --camera-size=1280x720 --max-fps=30 --no-audio --no-control --window-title="+WindowTitle+" --window-width=640 --window-height=360");
+        var p=new ProcessStartInfo(exe,"--serial "+Adb.Q(serial)+" --video-source=camera --camera-facing="+(front?"front":"back")+" --camera-size=1280x720 --max-fps=30 --no-audio --no-control --window-title="+WindowTitle+OrientationArguments(rotation));
         p.UseShellExecute=false;p.CreateNoWindow=true;p.WorkingDirectory=Path.GetDirectoryName(exe);p.RedirectStandardError=true;p.RedirectStandardOutput=true;
         p.EnvironmentVariables["ADB"]=adb.Exe;p.EnvironmentVariables["ADB_LIBUSB"]="1";p.EnvironmentVariables["ADB_SERVER_SOCKET"]="tcp:localhost:15037";
         camera=Process.Start(p);camera.ErrorDataReceived+=(s,e)=>{if(e.Data!=null)log(e.Data);};camera.OutputDataReceived+=(s,e)=>{if(e.Data!=null)log(e.Data);};camera.BeginErrorReadLine();camera.BeginOutputReadLine();

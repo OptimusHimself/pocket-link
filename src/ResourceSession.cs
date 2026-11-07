@@ -3,7 +3,7 @@ using System.IO;
 using System.Threading;
 
 sealed class ResourceOptions {
-    public string Serial;public bool Speaker,Camera,Microphone,FrontCamera;public int MicrophoneOutput=-1;
+    public string Serial;public bool Speaker,Camera,Microphone,FrontCamera;public int MicrophoneOutput=-1,CameraRotation=90;
     public void Validate(){if(String.IsNullOrEmpty(Serial))throw new InvalidOperationException("请选择已授权的手机。");if(!Speaker&&!Camera&&!Microphone)throw new InvalidOperationException("请至少选择一项手机资源。");if(Microphone&&MicrophoneOutput<0)throw new InvalidOperationException("会议麦克风需要 VB-CABLE。请先配置虚拟麦克风组件，或暂时取消麦克风。");}
 }
 sealed class ResourceSession {
@@ -22,7 +22,7 @@ sealed class ResourceSession {
                 }
                 if(options.Speaker){speaker=new Relay(adb,log);speaker.Connected+=()=>speakerReady.Set();speaker.Start(options.Serial,()=>{speakerEnded=true;speakerReady.Set();});Wait(speakerReady,20000);if(speakerEnded)throw new IOException("手机扬声器启动失败，详情见诊断日志。");}
                 if(stopping)return;
-                if(options.Camera){camera=new CameraBridge(adb,log);camera.Start(options.Serial,options.FrontCamera);}
+                if(options.Camera){camera=new CameraBridge(adb,log);camera.Start(options.Serial,options.FrontCamera,options.CameraRotation);}
                 if(stopping)return;
                 if(options.Microphone){mic=new MicrophoneBridge(adb,log);micThread=new Thread(()=>{try{mic.Run(options.Serial,options.MicrophoneOutput,()=>microphoneReady.Set());}catch(Exception e){micFailure=e;}finally{mic.Dispose();micEnded=true;microphoneReady.Set();}});micThread.IsBackground=true;micThread.Start();Wait(microphoneReady,20000);if(micEnded)throw new IOException(micFailure==null?"麦克风已断开":micFailure.Message);}
                 if(stopping)return;ready();

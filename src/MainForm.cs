@@ -11,7 +11,8 @@ sealed class MainForm : Form {
     readonly Adb adb;
     readonly RadioButton musicPreset=new RadioButton(),meetingPreset=new RadioButton();
     readonly CheckBox speakerChoice=new CheckBox(),cameraChoice=new CheckBox(),micChoice=new CheckBox();
-    readonly ComboBox facing=new ComboBox(),micOutput=new ComboBox();
+    readonly ComboBox facing=new ComboBox(),orientation=new ComboBox(),micOutput=new ComboBox();
+    static readonly int[] Rotations={90,270,0,180};int savedRotation=90;
 
     readonly ComboBox device=new ComboBox();
 
@@ -73,7 +74,9 @@ sealed class MainForm : Form {
         speakerChoice.Checked=true;
         p.Controls.Add(ResourceRow(speakerChoice,"扬声器","电脑 → 手机，完整立体声播放",null),0,3);
         facing.DropDownStyle=ComboBoxStyle.DropDownList;facing.Items.AddRange(new object[]{"前置摄像头","后置摄像头"});facing.SelectedIndex=0;facing.Width=200;
-        p.Controls.Add(ResourceRow(cameraChoice,"摄像头","手机 → 电脑，会议中选择 OBS Virtual Camera",facing),0,4);
+        orientation.DropDownStyle=ComboBoxStyle.DropDownList;orientation.Items.AddRange(new object[]{"竖持 · 90°","竖持反向 · 270°","横持 · 0°","横持反向 · 180°"});orientation.SelectedIndex=Array.IndexOf(Rotations,savedRotation);
+        TableLayoutPanel cameraControls=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=2,RowCount=1,Margin=Padding.Empty};cameraControls.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,45));cameraControls.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,55));facing.Dock=orientation.Dock=DockStyle.Fill;cameraControls.Controls.Add(facing,0,0);cameraControls.Controls.Add(orientation,1,0);
+        p.Controls.Add(ResourceRow(cameraChoice,"摄像头","手机 → 电脑，默认竖持；会议选 OBS Virtual Camera",cameraControls),0,4);
         micOutput.DropDownStyle=ComboBoxStyle.DropDownList;micOutput.Width=250;RefreshVirtualOutputs();
         p.Controls.Add(ResourceRow(micChoice,"麦克风","手机 → 电脑，会议中选择 CABLE Output",micOutput),0,5);
         FlowLayoutPanel extras=new FlowLayoutPanel{Dock=DockStyle.Fill};Button setup=new Button{Text="配置会议麦克风",AutoSize=true};setup.Click+=(s,e)=>ConfigureMicrophone();extras.Controls.Add(setup);reconnect.Text="听歌意外断开后自动重连";reconnect.AutoSize=true;extras.Controls.Add(reconnect);p.Controls.Add(extras,0,6);
@@ -103,7 +106,7 @@ sealed class MainForm : Form {
     void SetState(PlaybackState value,string message) {state=value;statusTitle.Text=value==PlaybackState.Idle?"未连接":value==PlaybackState.Connecting?"正在连接":value==PlaybackState.Playing?"所选资源已启动":value==PlaybackState.Stopping?"正在断开连接":"连接失败";statusTitle.ForeColor=value==PlaybackState.Failed?Color.Firebrick:value==PlaybackState.Playing?Color.FromArgb(20,112,72):Ink;statusHint.Text=message;UpdateControls();}
     void UpdateControls() {
         bool active=session!=null,busy=active||scanning;
-        device.Enabled=musicPreset.Enabled=meetingPreset.Enabled=speakerChoice.Enabled=cameraChoice.Enabled=micChoice.Enabled=facing.Enabled=micOutput.Enabled=!busy;
+        device.Enabled=musicPreset.Enabled=meetingPreset.Enabled=speakerChoice.Enabled=cameraChoice.Enabled=micChoice.Enabled=facing.Enabled=orientation.Enabled=micOutput.Enabled=!busy;
         micChoice.Enabled=micOutput.Enabled=!busy&&HasMicOutput();
         refresh.Enabled=repair.Enabled=!busy;
         start.Text=active?(state==PlaybackState.Stopping?"正在停止…":"断开连接"):"启动所选资源";
@@ -128,9 +131,9 @@ sealed class MainForm : Form {
         if(session!=null||scanning)return;Device selected=device.SelectedItem as Device;
         if(selected==null||!selected.Ready){SetState(PlaybackState.Failed,"请选择一台已授权的手机。");return;}
         WaveDevice target=micOutput.SelectedItem as WaveDevice;
-        ResourceOptions options=new ResourceOptions{Serial=selected.Serial,Speaker=speakerChoice.Checked,Camera=cameraChoice.Checked,Microphone=micChoice.Checked,FrontCamera=facing.SelectedIndex==0,MicrophoneOutput=target==null?-1:target.Id};
+        ResourceOptions options=new ResourceOptions{Serial=selected.Serial,Speaker=speakerChoice.Checked,Camera=cameraChoice.Checked,Microphone=micChoice.Checked,FrontCamera=facing.SelectedIndex==0,CameraRotation=Rotations[orientation.SelectedIndex],MicrophoneOutput=target==null?-1:target.Id};
         try{options.Validate();}catch(Exception e){SetState(PlaybackState.Failed,e.Message);return;}
-        stopRequested=retryPending=false;lastDevice=selected.Serial;SaveSettings();
+        stopRequested=retryPending=false;lastDevice=selected.Serial;savedRotation=options.CameraRotation;SaveSettings();
         ResourceSession current=new ResourceSession(adb,Log);session=current;
         Log("启动资源：扬声器="+options.Speaker+"，摄像头="+options.Camera+"，麦克风="+options.Microphone);
         SetState(PlaybackState.Connecting,"正在启动勾选的手机资源，未勾选的资源保持关闭。");
@@ -140,6 +143,6 @@ sealed class MainForm : Form {
         }));
     }
     void StopPlayback(){retryPending=false;stopRequested=true;if(session==null)return;SetState(PlaybackState.Stopping,"正在关闭扬声器、摄像头及麦克风通道…");session.Stop();}
-    void ReadSettings() {try{string[] values=File.ReadAllLines(settingsFile);if(values.Length>0)lastDevice=values[0];}catch(IOException){}catch(UnauthorizedAccessException){}}
-    void SaveSettings() {try{Directory.CreateDirectory(Path.GetDirectoryName(settingsFile));File.WriteAllLines(settingsFile,new string[]{lastDevice??""});}catch(Exception e){Log("无法保存设备选择："+e.Message);}}
+    void ReadSettings() {try{string[] values=File.ReadAllLines(settingsFile);if(values.Length>0)lastDevice=values[0];int rotation;if(values.Length>1&&Int32.TryParse(values[1],out rotation)&&Array.IndexOf(Rotations,rotation)>=0)savedRotation=rotation;}catch(IOException){}catch(UnauthorizedAccessException){}}
+    void SaveSettings() {try{Directory.CreateDirectory(Path.GetDirectoryName(settingsFile));File.WriteAllLines(settingsFile,new string[]{lastDevice??"",savedRotation.ToString()});}catch(Exception e){Log("无法保存设备选择："+e.Message);}}
 }
