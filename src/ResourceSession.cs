@@ -6,7 +6,7 @@ sealed class ResourceOptions {
     public string Serial;public bool Speaker,Camera,Microphone,FrontCamera;public int MicrophoneOutput=-1,CameraRotation=270;
     public void Validate(){if(String.IsNullOrEmpty(Serial))throw new InvalidOperationException("请选择已授权的手机。");if(!Speaker&&!Camera&&!Microphone)throw new InvalidOperationException("请至少选择一项手机资源。");if(Microphone&&MicrophoneOutput<0)throw new InvalidOperationException("会议麦克风需要 VB-CABLE。请先配置虚拟麦克风组件，或暂时取消麦克风。");}
 }
-sealed class ResourceSession {
+sealed class ResourceSession : IResourceJob {
     readonly Adb adb;readonly Action<string> log;volatile bool stopping,speakerEnded,micEnded;Relay speaker;CameraBridge camera;MicrophoneBridge mic;
     public ResourceSession(Adb adb,Action<string> log){this.adb=adb;this.log=log;}
     public void Start(ResourceOptions options,Action ready,Action<string> ended){

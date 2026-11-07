@@ -13,12 +13,18 @@ using System.Windows.Forms;
 static class Program {
     [STAThread] static int Main(string[] args) {
         if(args.Length>0 && args[0]=="--self-test") {SelfTest();return 0;}
+        if(args.Length==1&&(args[0]=="--exit"||args[0]=="--hide"||args[0]=="--show"))return SingleInstance.Signal(args[0].Substring(2))?0:1;
         string root=Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,".."));
         Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
         bool meeting=args.Length==2&&args[0]=="--meeting";
-        Application.Run(new MainForm(root,meeting?args[1]:args.Length==1?args[0]:null,meeting));return 0;
+        MainForm form=null;
+        using(var instance=new SingleInstance(()=>{if(form!=null)form.RevealWindow();},()=>{if(form!=null)form.CloseWindow();},()=>{if(form!=null)form.RequestExit();})){
+            if(!instance.Owner){for(int i=0;i<20;i++){if(SingleInstance.Signal("show"))return 0;Thread.Sleep(50);}return 1;}
+            form=new MainForm(root,meeting?args[1]:args.Length==1?args[0]:null,meeting);var handle=form.Handle;Application.Run(form);
+        }return 0;
     }
     static void SelfTest() {
+        ControllerTests.Run();
         try { Pcm.ReadExact(new MemoryStream(new byte[3]),new byte[4]);throw new Exception("Truncated stream accepted"); }catch(EndOfStreamException){}
         var devices=Adb.ParseDevices("List of devices attached\r\nleft device model:Honor\r\nright unauthorized\r\nthird offline\r\n");
         if(devices.Count!=3||!devices[0].Ready||devices[1].Ready||devices[2].Ready)throw new Exception("Device authorization states lost");
