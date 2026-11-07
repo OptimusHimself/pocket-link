@@ -12,7 +12,7 @@ sealed class MainForm : Form {
     readonly RadioButton musicPreset=new RadioButton(),meetingPreset=new RadioButton();
     readonly CheckBox speakerChoice=new CheckBox(),cameraChoice=new CheckBox(),micChoice=new CheckBox();
     readonly ComboBox facing=new ComboBox(),orientation=new ComboBox(),micOutput=new ComboBox();
-    static readonly int[] Rotations={270,90,0,180};int savedRotation=270;
+    static readonly int[] Rotations={270,90,0,180};int savedRotation=270,savedFacing;
 
     readonly ComboBox device=new ComboBox();
 
@@ -73,7 +73,7 @@ sealed class MainForm : Form {
         p.Controls.Add(new Label{Text="USB 手机",Dock=DockStyle.Fill},0,1);ConfigureChoice(device);p.Controls.Add(device,0,2);device.SelectedIndexChanged+=(s,e)=>UpdateControls();
         speakerChoice.Checked=true;
         p.Controls.Add(ResourceRow(speakerChoice,"扬声器","电脑 → 手机，完整立体声播放",null),0,3);
-        facing.DropDownStyle=ComboBoxStyle.DropDownList;facing.Items.AddRange(new object[]{"前置摄像头","后置摄像头"});facing.SelectedIndex=0;facing.Width=200;
+        facing.DropDownStyle=ComboBoxStyle.DropDownList;facing.Items.AddRange(new object[]{"前置摄像头","后置摄像头"});facing.SelectedIndex=savedFacing;facing.Width=200;
         orientation.DropDownStyle=ComboBoxStyle.DropDownList;orientation.Items.AddRange(new object[]{"竖持 · 270°","竖持反向 · 90°","横持 · 0°","横持反向 · 180°"});orientation.SelectedIndex=Array.IndexOf(Rotations,savedRotation);
         TableLayoutPanel cameraControls=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=2,RowCount=1,Margin=Padding.Empty};cameraControls.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,45));cameraControls.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,55));facing.Dock=orientation.Dock=DockStyle.Fill;cameraControls.Controls.Add(facing,0,0);cameraControls.Controls.Add(orientation,1,0);
         p.Controls.Add(ResourceRow(cameraChoice,"摄像头","手机 → 电脑，默认竖持；会议选 OBS Virtual Camera",cameraControls),0,4);
@@ -133,7 +133,7 @@ sealed class MainForm : Form {
         WaveDevice target=micOutput.SelectedItem as WaveDevice;
         ResourceOptions options=new ResourceOptions{Serial=selected.Serial,Speaker=speakerChoice.Checked,Camera=cameraChoice.Checked,Microphone=micChoice.Checked,FrontCamera=facing.SelectedIndex==0,CameraRotation=Rotations[orientation.SelectedIndex],MicrophoneOutput=target==null?-1:target.Id};
         try{options.Validate();}catch(Exception e){SetState(PlaybackState.Failed,e.Message);return;}
-        stopRequested=retryPending=false;lastDevice=selected.Serial;savedRotation=options.CameraRotation;SaveSettings();
+        stopRequested=retryPending=false;lastDevice=selected.Serial;savedRotation=options.CameraRotation;savedFacing=facing.SelectedIndex;SaveSettings();
         ResourceSession current=new ResourceSession(adb,Log);session=current;
         Log("启动资源：扬声器="+options.Speaker+"，摄像头="+options.Camera+"，麦克风="+options.Microphone);
         SetState(PlaybackState.Connecting,"正在启动勾选的手机资源，未勾选的资源保持关闭。");
@@ -143,6 +143,6 @@ sealed class MainForm : Form {
         }));
     }
     void StopPlayback(){retryPending=false;stopRequested=true;if(session==null)return;SetState(PlaybackState.Stopping,"正在关闭扬声器、摄像头及麦克风通道…");session.Stop();}
-    void ReadSettings() {try{string[] values=File.ReadAllLines(settingsFile);if(values.Length>0)lastDevice=values[0];int rotation;if(values.Length>1&&Int32.TryParse(values[1],out rotation)&&Array.IndexOf(Rotations,rotation)>=0)savedRotation=rotation;}catch(IOException){}catch(UnauthorizedAccessException){}}
-    void SaveSettings() {try{Directory.CreateDirectory(Path.GetDirectoryName(settingsFile));File.WriteAllLines(settingsFile,new string[]{lastDevice??"",savedRotation.ToString()});}catch(Exception e){Log("无法保存设备选择："+e.Message);}}
+    void ReadSettings() {try{string[] values=File.ReadAllLines(settingsFile);if(values.Length>0)lastDevice=values[0];int rotation;if(values.Length>1&&Int32.TryParse(values[1],out rotation)&&Array.IndexOf(Rotations,rotation)>=0)savedRotation=rotation;int lens;if(values.Length>2&&Int32.TryParse(values[2],out lens)&&(lens==0||lens==1))savedFacing=lens;}catch(IOException){}catch(UnauthorizedAccessException){}}
+    void SaveSettings() {try{Directory.CreateDirectory(Path.GetDirectoryName(settingsFile));File.WriteAllLines(settingsFile,new string[]{lastDevice??"",savedRotation.ToString(),savedFacing.ToString()});}catch(Exception e){Log("无法保存设备选择："+e.Message);}}
 }
