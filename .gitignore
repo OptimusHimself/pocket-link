@@ -1,0 +1,6 @@
+/tools/
+/vendor/
+/build/
+/logs/
+/.runtime/
+*.user
