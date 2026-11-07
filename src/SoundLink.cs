@@ -48,7 +48,7 @@ sealed class Adb {
     public readonly string Root, Exe;
     public Adb(string root) { Root=root; Exe=Path.Combine(root,"tools/platform-tools/adb.exe"); }
     public Process Spawn(string args) {
-        ProcessStartInfo p=new ProcessStartInfo(Exe,args); p.UseShellExecute=false; p.CreateNoWindow=true;
+        ProcessStartInfo p=new ProcessStartInfo(Exe,"-P 15037 "+args); p.UseShellExecute=false; p.CreateNoWindow=true;
         p.RedirectStandardOutput=true; p.RedirectStandardError=true; p.EnvironmentVariables["ADB_LIBUSB"]="1";
         Process proc=Process.Start(p); return proc;
     }
@@ -98,10 +98,12 @@ sealed class Relay : IDisposable {
         lock(sockets) sockets.Add(c); return c;
     }
     void Run(string left,string right,int delayL,int delayR) {
+        bool single=right==null;
         if(left==right) throw new Exception("左右声道必须选择不同手机");
-        log("准备左右设备…");
-        TcpListener[] outputs={Listen(),Listen()}; string[] ids={left,right};
-        for(int i=0;i<2;i++) {
+        log(single?"准备单手机完整立体声…":"准备左右设备…");
+        TcpListener[] outputs=single?new TcpListener[]{Listen()}:new TcpListener[]{Listen(),Listen()}; string[] ids=single?new string[]{left}:new string[]{left,right};
+        for(int i=0;i<ids.Length;i++) {
+            if(stopping) return;
             string prefix="-s "+Adb.Q(ids[i])+" ";
             adb.Run(prefix+"push "+Adb.Q(Path.Combine(adb.Root,"tools/AudioShare/server"))+" /data/local/tmp/soundlink-server");
             adb.Run(prefix+"reverse localabstract:"+tunnel+" tcp:"+((IPEndPoint)outputs[i].LocalEndpoint).Port);
@@ -110,9 +112,10 @@ sealed class Relay : IDisposable {
             p.OutputDataReceived+=(s,e)=>{}; p.ErrorDataReceived+=(s,e)=>{if(!String.IsNullOrEmpty(e.Data)) log(e.Data);};
             p.BeginOutputReadLine();p.BeginErrorReadLine(); children.Add(p);
         }
-        TcpClient lc=Accept(outputs[0]), rc=Accept(outputs[1]);
+        TcpClient lc=Accept(outputs[0]), rc=single?null:Accept(outputs[1]);
         // Consume each phone's handshake before starting the shared audio timeline.
-        byte[] hello=new byte[256]; lc.GetStream().Read(hello,0,hello.Length); rc.GetStream().Read(hello,0,hello.Length);
+        byte[] hello=Encoding.UTF8.GetBytes(left); Pcm.ReadExact(lc.GetStream(),hello);
+        if(rc!=null) { hello=Encoding.UTF8.GetBytes(right); Pcm.ReadExact(rc.GetStream(),hello); }
         if(stopping) return;
         if(Native.AudioCapture_Initialize()!=1) throw new Exception("无法采集 Windows 默认输出设备"); nativeInitialized=true;
         // Reserve a local ephemeral port, then let the upstream capture DLL listen on it.
@@ -126,14 +129,16 @@ sealed class Relay : IDisposable {
         byte[] header=new byte[8]; Pcm.ReadExact(input.GetStream(),header);
         int rate=BitConverter.ToInt32(header,0);
         if(BitConverter.ToUInt16(header,4)!=2 || BitConverter.ToUInt16(header,6)!=16 || rate<8000 || rate>192000) throw new Exception("不支持的采集格式");
-        byte[] mono=Pcm.Header(rate); lc.GetStream().Write(mono,0,8);rc.GetStream().Write(mono,0,8);
-        ChannelDelay dl=new ChannelDelay(rate*delayL/1000), dr=new ChannelDelay(rate*delayR/1000);
+        byte[] mono=Pcm.Header(rate); lc.GetStream().Write(single?header:mono,0,8);if(rc!=null)rc.GetStream().Write(mono,0,8);
+        ChannelDelay dl=new ChannelDelay(rate*delayL/1000*(single?2:1)), dr=new ChannelDelay(rate*delayR/1000);
         byte[] source=new byte[rate/100*4], ldata=new byte[source.Length/2],rdata=new byte[source.Length/2];
-        input.ReceiveTimeout=0; log("已连接：左="+left+"，右="+right+"；"+rate+" Hz。请播放网易云音乐。");
+        input.ReceiveTimeout=0; log(single?"已连接：单手机完整立体声="+left+"；"+rate+" Hz。请播放网易云音乐。":"已连接：左="+left+"，右="+right+"；"+rate+" Hz。请播放网易云音乐。");
         long frames=0; Stopwatch stats=Stopwatch.StartNew();
         while(!stopping) {
-            Pcm.ReadExact(input.GetStream(),source); Pcm.Split(source,source.Length,ldata,rdata); dl.Apply(ldata);dr.Apply(rdata);
-            lc.GetStream().Write(ldata,0,ldata.Length); rc.GetStream().Write(rdata,0,rdata.Length); frames+=source.Length/4;
+            Pcm.ReadExact(input.GetStream(),source);
+            if(single) {dl.Apply(source);lc.GetStream().Write(source,0,source.Length);}
+            else {Pcm.Split(source,source.Length,ldata,rdata); dl.Apply(ldata);dr.Apply(rdata);lc.GetStream().Write(ldata,0,ldata.Length);rc.GetStream().Write(rdata,0,rdata.Length);}
+            frames+=source.Length/4;
             if(stats.ElapsedMilliseconds>=5000) { log("传输中：每声道 "+frames+" 帧；延迟补偿 L="+delayL+" ms / R="+delayR+" ms"); stats.Restart(); }
         }
     }
@@ -151,11 +156,13 @@ sealed class MainForm : Form {
     readonly ComboBox left=new ComboBox(),right=new ComboBox();
     readonly NumericUpDown delayL=new NumericUpDown(),delayR=new NumericUpDown();
     readonly TextBox status=new TextBox(); readonly Button start=new Button(), refresh=new Button();
+    readonly CheckBox single=new CheckBox();
     readonly Adb adb; Relay relay; bool closing;
     public MainForm(string root,string autoLeft,string autoRight) {
         adb=new Adb(root); Text="SoundLink · 双手机立体声"; ClientSize=new Size(740,440); MinimumSize=new Size(756,479);
         Font=new Font("Microsoft YaHei UI",10); StartPosition=FormStartPosition.CenterScreen;
-        Label title=new Label{Text="两台手机，分别播放左 / 右声道",AutoSize=true,Location=new Point(20,18)};Controls.Add(title);
+        Label title=new Label{Text="USB 音频：单手机完整播放 / 双手机左右分流",AutoSize=true,Location=new Point(20,18)};Controls.Add(title);
+        single.Text="单手机模式（完整立体声）";single.SetBounds(430,15,285,30);single.CheckedChanged+=(s,e)=>{right.Enabled=delayR.Enabled=!single.Checked && relay==null;start.Text=single.Checked?"开始单手机播放":"开始双声道";};Controls.Add(single);
         AddLabel("左声道手机",20,65); AddLabel("右声道手机",385,65);
         left.SetBounds(20,90,335,30);right.SetBounds(385,90,335,30);left.DropDownStyle=right.DropDownStyle=ComboBoxStyle.DropDownList;
         Controls.Add(left);Controls.Add(right);
@@ -168,20 +175,20 @@ sealed class MainForm : Form {
         Button test=new Button{Text="左右声道测试",Bounds=new Rectangle(430,185,160,36)};test.Click+=(s,e)=>TestTone();Controls.Add(test);
         status.SetBounds(20,240,700,175);status.Multiline=true;status.ReadOnly=true;status.ScrollBars=ScrollBars.Vertical;status.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right|AnchorStyles.Bottom;Controls.Add(status);
         FormClosing+=(s,e)=>{closing=true;if(relay!=null)relay.Dispose();};
-        Shown+=(s,e)=>{RefreshDevices();if(autoLeft!=null && autoRight!=null) { Select(left,autoLeft);Select(right,autoRight);Toggle(); }};
+        Shown+=(s,e)=>{RefreshDevices();if(autoLeft!=null) { Select(left,autoLeft);if(autoRight!=null)Select(right,autoRight);single.Checked=autoRight==null;Toggle(); }};
     }
     static void Select(ComboBox box,string id) { foreach(Device d in box.Items) if(d.Serial==id)box.SelectedItem=d; }
     void AddLabel(string text,int x,int y) { Controls.Add(new Label{Text=text,AutoSize=true,Location=new Point(x,y)}); }
     void Log(string text) { if(closing || IsDisposed)return; if(InvokeRequired) {BeginInvoke(new Action<string>(Log),text);return;}status.AppendText(DateTime.Now.ToString("HH:mm:ss")+" "+text+Environment.NewLine); }
-    void RefreshDevices() { try { var devices=adb.Devices();left.Items.Clear();right.Items.Clear();foreach(Device d in devices){left.Items.Add(d);right.Items.Add(d);}if(devices.Count>0)left.SelectedIndex=0;if(devices.Count>1)right.SelectedIndex=1;Log("已授权设备："+devices.Count+" 台。需要两台不同手机。"); }catch(Exception e){Log(e.Message);} }
+    void RefreshDevices() { try { var devices=adb.Devices();left.Items.Clear();right.Items.Clear();foreach(Device d in devices){left.Items.Add(d);right.Items.Add(d);}if(devices.Count>0)left.SelectedIndex=0;if(devices.Count>1)right.SelectedIndex=1;single.Checked=devices.Count<2;Log("已授权设备："+devices.Count+" 台；项目 ADB 端口 15037。"+(devices.Count==0?"请确认数据线与 USB 调试授权。":single.Checked?"使用单手机完整立体声。":"可使用双手机左右声道。")); }catch(Exception e){Log(e.Message);} }
     void Toggle() {
         if(relay!=null) {start.Enabled=false;relay.Stop();Log("正在停止…");return;}
         Device l=left.SelectedItem as Device,r=right.SelectedItem as Device;
-        if(l==null || r==null || l.Serial==r.Serial) {Log("请选择两台不同且已授权的手机");return;}
+        if(l==null || (!single.Checked && (r==null || l.Serial==r.Serial))) {Log("单手机模式需选择一台手机；双手机模式需两台不同手机");return;}
         SetRunning(true);Relay current=new Relay(adb,Log);relay=current;
-        current.Start(l.Serial,r.Serial,(int)delayL.Value,(int)delayR.Value,()=>{if(!closing)BeginInvoke(new Action(()=>{if(relay==current){relay=null;SetRunning(false);}}));});
+        current.Start(l.Serial,single.Checked?null:r.Serial,(int)delayL.Value,(int)delayR.Value,()=>{if(!closing)BeginInvoke(new Action(()=>{if(relay==current){relay=null;SetRunning(false);}}));});
     }
-    void SetRunning(bool running) {start.Enabled=true;start.Text=running?"停止":"开始双声道";left.Enabled=right.Enabled=delayL.Enabled=delayR.Enabled=refresh.Enabled=!running;}
+    void SetRunning(bool running) {start.Enabled=true;start.Text=running?"停止":single.Checked?"开始单手机播放":"开始双声道";left.Enabled=delayL.Enabled=refresh.Enabled=single.Enabled=!running;right.Enabled=delayR.Enabled=!running && !single.Checked;}
     MemoryStream tone; System.Media.SoundPlayer player;
     void TestTone() {
         if(relay==null){Log("请先开始双声道连接");return;}
@@ -198,13 +205,22 @@ static class Program {
         if(args.Length>0 && args[0]=="--self-test") {SelfTest();return 0;}
         string root=Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,".."));
         Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
-        Application.Run(new MainForm(root,args.Length==2?args[0]:null,args.Length==2?args[1]:null));return 0;
+        Application.Run(new MainForm(root,args.Length>=1?args[0]:null,args.Length==2?args[1]:null));return 0;
     }
     static void SelfTest() {
         byte[] input={1,2,3,4,5,6,7,8},l=new byte[4],r=new byte[4];Pcm.Split(input,8,l,r);
         if(BitConverter.ToString(l)!="01-02-05-06" || BitConverter.ToString(r)!="03-04-07-08")throw new Exception("Channel leakage");
         ChannelDelay d=new ChannelDelay(1);d.Apply(l);if(BitConverter.ToString(l)!="00-00-01-02")throw new Exception("Delay initial block");d.Apply(r);if(BitConverter.ToString(r)!="05-06-03-04")throw new Exception("Delay continuity");
         byte[] h=Pcm.Header(48000);if(BitConverter.ToString(h)!="80-BB-00-00-01-00-10-00")throw new Exception("Mono header");
-        Console.WriteLine("PASS: left/right isolation, sample-preserving delay across blocks, mono protocol header");
+        byte[] stimulus=new byte[48000*4],a=new byte[stimulus.Length/2],b=new byte[stimulus.Length/2];
+        // Alternate hard-panned impulses: the other device must receive exact zeros.
+        stimulus[0]=0x34;stimulus[1]=0x12;Pcm.Split(stimulus,stimulus.Length,a,b);
+        if(a[0]!=0x34 || a[1]!=0x12 || Array.Exists(b,x=>x!=0))throw new Exception("Left-only stimulus leaked right");
+        Array.Clear(stimulus,0,stimulus.Length);stimulus[2]=0x78;stimulus[3]=0x56;Pcm.Split(stimulus,stimulus.Length,a,b);
+        if(b[0]!=0x78 || b[1]!=0x56 || Array.Exists(a,x=>x!=0))throw new Exception("Right-only stimulus leaked left");
+        Array.Clear(stimulus,0,stimulus.Length);stimulus[0]=stimulus[2]=0x12;Pcm.Split(stimulus,stimulus.Length,a,b);
+        if(BitConverter.ToString(a)!=BitConverter.ToString(b))throw new Exception("Dual-mono source must match on both outputs");
+        try { Pcm.ReadExact(new MemoryStream(new byte[3]),new byte[4]);throw new Exception("Truncated stream accepted"); }catch(EndOfStreamException){}
+        Console.WriteLine("PASS: hard-panned channel isolation, dual-mono source, sample delay continuity, protocol header, disconnected stream");
     }
 }
