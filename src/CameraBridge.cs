@@ -17,7 +17,7 @@ sealed class CameraBridge : IDisposable {
         if(rotation!=0&&rotation!=90&&rotation!=180&&rotation!=270)throw new ArgumentOutOfRangeException("rotation");
         return " --display-orientation="+rotation+((rotation==90||rotation==270)?" --window-width=360 --window-height=640":" --window-width=640 --window-height=360");
     }
-    public void Start(string serial,bool front,int rotation=90){
+    public void Start(string serial,bool front,int rotation=270){
         string exe=Path.Combine(adb.Root,"tools/scrcpy-win64-v5.0.1/scrcpy.exe"),obsExe=FindObs();
         if(!File.Exists(exe))throw new IOException("缺少摄像头组件，请运行 Setup-Resources.ps1。");
         if(obsExe==null)throw new IOException("未找到 OBS Studio。请先安装 OBS 及其 Virtual Camera。");
