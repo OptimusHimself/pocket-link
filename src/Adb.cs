@@ -45,5 +45,3 @@ sealed class Adb {
         } return result;
     }
 }
-
-
