@@ -28,6 +28,7 @@ static class Program {
         }return 0;
     }
     static void SelfTest() {
+        UiSelectionTests.Run();
         ControllerTests.Run();
         AudioDeviceTests.Run();
         CameraPipelineTests.Run();

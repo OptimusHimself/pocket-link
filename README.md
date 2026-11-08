@@ -1,6 +1,22 @@
-# PocketLink：USB 手机资源控制台
+# PocketLink：独立手机资源控制台
 
 一个脚本启动，选择一台 USB 手机，按需启用扬声器、摄像头和麦克风。
+
+Windows x64 桌面工具，通过 USB 调试连接 Android 手机。支持资源独立开关、托盘常驻、前后镜头切换与实时旋转。当前摄像头输出为 OBS Virtual Camera，Windows 自带相机应用可能无法识别；微信、腾讯会议已做过实机验证。
+
+原创代码采用 [MIT](LICENSE)；第三方组件及字体保留各自许可证，见 [第三方说明](THIRD_PARTY_NOTICES.md)。
+
+## 从源码首次运行
+
+仓库不包含下载工具或本地运行数据。首次克隆后，请先准备：
+
+1. 从 [Android 官方](https://developer.android.com/tools/releases/platform-tools) 下载 Windows platform-tools，解压为 `tools/platform-tools/`。
+2. 从 [AudioShare v2.2.2](https://github.com/ysbing/AudioShare/releases/tag/v2.2.2) 的 Windows 发行包提取 `server` 和 `audio_capture.dll`，放入 `tools/AudioShare/`。完整上游源码及许可证见 `third_party/AudioShare/NOTICE.md`。
+3. 执行 `./Setup-Resources.ps1` 准备 scrcpy 服务端。摄像头还需安装 OBS Studio（含虚拟摄像头）及 FFmpeg；FFmpeg 可放入 `tools/ffmpeg/ffmpeg.exe` 或加入 PATH。
+4. 手机开启 USB 调试并允许电脑授权。麦克风需要 Android 11+，摄像头需要 Android 12+。需要麦克风时另按下文配置 VB-CABLE。
+5. 执行 `./Build.ps1`，再执行 `./Start-Pocketlink.ps1`。编译使用 Windows 自带的 .NET Framework 编译器。
+
+OBS 默认检测标准 Program Files 安装路径，并兼容开发机上的 `D:/obs-studio`。本机路径、性能报告属于开发记录，不是其他电脑的必需配置。
 
 ```powershell
 ./Start-Pocketlink.ps1
@@ -8,12 +24,12 @@
 
 ## 使用
 
-- 启动时所有资源关闭。扬声器、摄像头、麦克风始终显示，独立勾选即可立即启停，也可点击“应用资源选择”重试。
+- 启动时所有资源关闭。英文界面使用 Speaker、Camera、Microphone 独立开关，即时启停；失败后关闭再开启可重试。单部已授权手机自动选中。
 - 扬声器传输完整立体声；启用摄像头才会启动对应 OBS 实例。
 - “重新连接”会先关闭当前音视频资源，等待清理完成后重新检查 USB 设备；完成后保持待命，由用户重新勾选资源。平时插拔仍自动识别。
 - 关闭所有资源会释放采集；关闭主窗口只隐藏到托盘。托盘右键“退出 PocketLink”才会释放资源并退出。
 - 腾讯会议、钉钉中，摄像头选 OBS Virtual Camera，麦克风选 CABLE Output。
-- 控制台的麦克风输出选 CABLE Input。手机不需要连接 Wi-Fi。
+- 控制台自动使用唯一可用的 CABLE Input；多条候选音频线时才弹出选择。手机不需要连接 Wi-Fi。
 - 会议软件中的画面和输入音量条仍需实际检查；程序不会自动加入会议、直播或录制媒体。
 
 ## 首次配置
@@ -30,7 +46,7 @@
 
 麦克风要求 Android 11+，并需要 VB-CABLE 虚拟音频线。它是非开源的 Donationware。
 已尝试调查开源虚拟音频驱动；当前实现选择 VB-CABLE 明确支持的播放端到录音端回环。
-控制台“配置会议麦克风”按钮运行：
+托盘菜单“Microphone setup”运行（缺少组件时开启麦克风也会提示）：
 
 ```powershell
 ./Setup-Resources.ps1 -InstallMicrophone
@@ -58,7 +74,7 @@
 ```
 
 使用 Windows 已有 .NET Framework 编译器，无需全局安装 SDK。
-MainForm 管理页面；ResourceSession 管理资源生命周期；Relay 转发单手机完整音频；
+UiTheme 集中管理外观和内嵌字体、图标；PocketLinkView 负责布局与控件绘制；MainForm 协调设备、操作与状态；UiSelection 管理自动选择策略。ResourceSession 管理资源生命周期；Relay 转发单手机完整音频；
 CameraBridge 管理 scrcpy 和专用 OBS 实例；MicrophoneBridge 与 WaveOutput 把手机 PCM 送入虚拟音频线。
 Adb 和 Audio 提供 USB 与音频协议。
 
@@ -71,7 +87,7 @@ Adb 和 Audio 提供 USB 与音频协议。
 ## 腾讯会议使用注意
 
 先在控制台启动视频会议资源，再在腾讯会议中选择 OBS Virtual Camera 和 CABLE Output。
-控制台可隐藏到托盘；摄像头后台将视频送入专用 OBS 浏览器源，无需保留手机预览窗口。点击“打开摄像头预览”可查看输出，关闭预览不停止采集。
+控制台可隐藏到托盘；摄像头后台将视频送入专用 OBS 浏览器源，无需保留手机预览窗口。主界面不提供独立预览按钮，可在会议软件中检查虚拟摄像头画面。
 会议扬声器应选显示器、耳机等实际播放设备，不要选 CABLE Input 或 VB-Audio Virtual Cable，否则会议声音会进入虚拟麦克风。
 “入会开启摄像头”默认未勾选时，进入会议后需手动开启视频。
 诊断日志保存在 .runtime/session.log，仅含状态和组件日志，不录制媒体。
@@ -91,7 +107,7 @@ Adb 和 Audio 提供 USB 与音频协议。
 - 各资源独立运行：新增资源、单项失败或关闭不会停止其他正常资源。
 - USB 插拔采用 Windows 设备通知和阻塞式 ADB track-devices 订阅，1200 ms 合并事件，不周期性启动 adb devices。
 - 拔出所选手机会停止采集和本程序管理的 OBS、scrcpy，保留托盘及轻量设备订阅。
-- 插回后重新识别、待命；摄像头和麦克风不会自动恢复。勾选“听歌意外断开后自动重连”才会恢复同一序列号手机的扬声器。
+- 插回后重新识别并待命；三个资源均保持关闭，需要手动开启。
 - 退出会等资源清理完成，停止设备订阅，并关闭专属端口 15037 的 ADB；不影响其他端口的 ADB。
 - 控制台隐藏后的一个 8 秒无设备待机采样中，进程 CPU 时间增量为 0 ms；这是一次采样，不代表所有电脑上的固定占用。
 
@@ -127,3 +143,7 @@ Adb 和 Audio 提供 USB 与音频协议。
 ```
 
 故障注入只操作测试进程自己启动的组件和 ADB 15037 传输。不会替代真实 Windows/ROM/驱动升级后的兼容性验收；测试前请停止会议及其他 OBS/FFmpeg 工作负载。
+
+## 界面资源
+
+Orbitron 字体和 PocketLink 图标均嵌入 EXE，不需要安装字体或联网。字体许可随构建输出为 Orbitron-OFL.txt。诊断日志、报告保存、麦克风配置和 Stop all 位于托盘菜单。界面只保留简短英文错误提示，详细组件信息记录在诊断日志中。

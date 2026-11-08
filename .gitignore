@@ -1,6 +1,7 @@
 /tools/
 /vendor/
 /build/
+/build-ui/
 /logs/
 /.runtime/
 *.user
