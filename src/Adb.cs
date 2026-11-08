@@ -23,18 +23,15 @@ sealed class Adb {
         p.RedirectStandardOutput=true; p.RedirectStandardError=true; p.EnvironmentVariables["ADB_LIBUSB"]="1";
         Process proc=Process.Start(p); return proc;
     }
-    public string Run(string args) {
+    public string Run(string args,Func<bool> canceled=null,int timeout=15000) {
+        if(canceled!=null&&canceled())throw new OperationCanceledException();
         using(Process p=Spawn(args)) {
-            string output="",error="";
-            p.OutputDataReceived+=(s,e)=> { if(e.Data!=null) output+=e.Data+"\n"; };
-            p.ErrorDataReceived+=(s,e)=> { if(e.Data!=null) error+=e.Data+"\n"; };
-            p.BeginOutputReadLine(); p.BeginErrorReadLine();
-            if(!p.WaitForExit(15000)) { p.Kill(); throw new Exception("ADB timeout: "+args); } p.WaitForExit();
-            if(p.ExitCode!=0) throw new Exception(error+output); return output;
+            ProcessOutput result=ProcessRunner.Run(p,timeout,canceled);
+            if(result.ExitCode!=0)throw new IOException("ADB 执行失败："+result.Error+result.Output);return result.Output;
         }
     }
     public static string Q(string value) { if(value.IndexOf('"')>=0) throw new ArgumentException("Invalid argument"); return "\""+value+"\""; }
-    public List<Device> Devices() { return ParseDevices(Run("devices -l")); }
+    public List<Device> Devices(Func<bool> canceled=null) { return ParseDevices(Run("devices -l",canceled)); }
     internal static List<Device> ParseDevices(string output) {
         List<Device> result=new List<Device>();
         foreach(string line in output.Split('\n')) {

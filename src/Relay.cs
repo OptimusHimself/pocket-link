@@ -7,26 +7,29 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 
-sealed class Relay {
+interface ISpeakerRelay {event Action Connected;bool PhoneAlive{get;}string Failure{get;}void Start(string device,Action ended);void Stop();}
+sealed class Relay:ISpeakerRelay {
     readonly Adb adb; readonly Action<string> log;
     Process player;string serial;bool mapped;
     readonly List<TcpClient> sockets=new List<TcpClient>();
     readonly List<TcpListener> listeners=new List<TcpListener>();
-    readonly string tunnel="soundlink_"+Process.GetCurrentProcess().Id;
+    static int generation;readonly string tunnel="soundlink_"+Process.GetCurrentProcess().Id+"_"+Interlocked.Increment(ref generation);
     volatile bool stopping; bool nativeInitialized;
     public event Action Connected;
+    public bool PhoneAlive{get{try{return player!=null&&!player.HasExited;}catch(InvalidOperationException){return false;}}}
+    public string Failure{get;private set;}
     public Relay(Adb a, Action<string> l) { adb=a; log=l; }
     public void Start(string device,Action ended) {
         Thread worker=new Thread(()=> {
             try { Run(device); }
-            catch(Exception e) { if(!stopping) log("停止："+e.Message); }
+            catch(Exception e) { if(!stopping){Failure=e.Message;log("停止："+e.Message);} }
             finally { try { Cleanup(); } finally { ended(); } }
         }); worker.IsBackground=true; worker.SetApartmentState(ApartmentState.MTA); worker.Start();
     }
     TcpListener Listen() { TcpListener l=new TcpListener(IPAddress.Loopback,0); l.Start(); lock(listeners) listeners.Add(l); return l; }
     TcpClient Accept(TcpListener listener) {
         var pending=listener.BeginAcceptTcpClient(null,null);
-        using(var wait=pending.AsyncWaitHandle){if(!wait.WaitOne(15000)) throw new Exception("手机连接超时，请检查 USB 调试授权");}
+        using(var wait=pending.AsyncWaitHandle){int elapsed=0;while(!wait.WaitOne(100)){if(stopping)throw new OperationCanceledException();if(++elapsed>=150)throw new Exception("手机连接超时，请检查 USB 调试授权");}}
         TcpClient c=listener.EndAcceptTcpClient(pending); c.NoDelay=true; c.SendTimeout=1500; c.ReceiveTimeout=15000;
         lock(sockets) sockets.Add(c); return c;
     }
@@ -37,7 +40,7 @@ sealed class Relay {
         serial=device;TcpListener output=Listen();
         if(stopping) return;
         string prefix="-s "+Adb.Q(device)+" ";
-        adb.Run(prefix+"push "+Adb.Q(Path.Combine(adb.Root,"tools/AudioShare/server"))+" /data/local/tmp/soundlink-server");if(stopping)return;
+        adb.Run(prefix+"push "+Adb.Q(Path.Combine(adb.Root,"tools/AudioShare/server"))+" /data/local/tmp/soundlink-server",()=>stopping);if(stopping)return;
         adb.Run(prefix+"reverse localabstract:"+tunnel+" tcp:"+((IPEndPoint)output.LocalEndpoint).Port);mapped=true;if(stopping)return;
         player=adb.Spawn(prefix+"shell app_process -Djava.class.path=/data/local/tmp/soundlink-server /data/local/tmp com.ysbing.audioshare.Main socketName="+tunnel+" connectCode="+device);
         player.OutputDataReceived+=(s,e)=>{};player.ErrorDataReceived+=(s,e)=>{if(!String.IsNullOrEmpty(e.Data))log(e.Data);};player.BeginOutputReadLine();player.BeginErrorReadLine();
@@ -46,7 +49,7 @@ sealed class Relay {
         byte[] hello=Encoding.UTF8.GetBytes(device); Pcm.ReadExact(phone.GetStream(),hello);
 
         if(stopping) return;
-        if(Native.AudioCapture_Initialize()!=1) throw new Exception("无法采集 Windows 默认输出设备"); nativeInitialized=true;
+        if(Native.AudioCapture_Initialize()!=1) throw new Exception("无法采集 Windows 默认输出设备"); nativeInitialized=true;if(stopping)return;
         // Reserve a local ephemeral port, then let the upstream capture DLL listen on it.
         TcpListener reserve=Listen(); int port=((IPEndPoint)reserve.LocalEndpoint).Port; reserve.Stop();
         if(Native.AudioCapture_Listen(port,IntPtr.Zero)!=1) throw new Exception("采集端口启动失败");
@@ -70,11 +73,12 @@ sealed class Relay {
             if(stats.ElapsedMilliseconds>=5000) { log("传输中："+frames+" 帧"); stats.Restart(); }
         }
     }
-    void CloseIO() { lock(sockets) foreach(TcpClient c in sockets) { try { c.Close(); } catch {} } lock(listeners) foreach(TcpListener l in listeners) { try { l.Stop(); } catch {} } }
+    void CloseIO() {TcpClient[] clients;TcpListener[] servers;lock(sockets)clients=sockets.ToArray();lock(listeners)servers=listeners.ToArray();foreach(TcpClient c in clients){try{c.Close();}catch{}}foreach(TcpListener l in servers){try{l.Stop();}catch{}}}
     void Cleanup() {
-        CloseIO(); if(nativeInitialized) { Native.AudioCapture_Cleanup(); nativeInitialized=false; }
-        if(player!=null){try{if(!player.HasExited)player.Kill();player.Dispose();}catch{}}
-        if(mapped){try{adb.Run("-s "+Adb.Q(serial)+" reverse --remove localabstract:"+tunnel);}catch{}}
+        log("扬声器清理：关闭连接");CloseIO(); if(nativeInitialized) { log("扬声器清理：释放原生采集");Native.AudioCapture_Cleanup(); nativeInitialized=false;log("扬声器清理：原生采集已释放"); }
+        log("扬声器清理：释放手机进程");if(player!=null){try{if(!player.HasExited)player.Kill();player.Dispose();}catch{}}
+        log("扬声器清理：移除 USB 映射");if(mapped){mapped=false;try{adb.Run("-s "+Adb.Q(serial)+" reverse --remove localabstract:"+tunnel,null,1000);}catch(Exception e){log("旧扬声器映射清理未完成："+e.Message);}}
+        log("扬声器清理：完成");
     }
     public void Stop() { stopping=true;CloseIO(); }
 

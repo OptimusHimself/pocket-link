@@ -16,7 +16,8 @@ sealed class MainForm : Form {
 
     readonly ComboBox device=new ComboBox();
 
-    readonly Button start=new Button(),reconnectButton=new Button();
+    readonly Button start=new Button(),reconnectButton=new Button(),diagnosticButton=new Button();
+    bool reporting;string lastFailure;readonly System.Diagnostics.Stopwatch autoReportClock=new System.Diagnostics.Stopwatch();
     readonly Label heading=new Label(),hint=new Label(),deviceCount=new Label(),statusTitle=new Label(),statusHint=new Label();
     readonly TextBox details=new TextBox();
     readonly Panel logPanel=new Panel();
@@ -49,15 +50,16 @@ sealed class MainForm : Form {
         Panel playback=new Panel{Dock=DockStyle.Fill,BackColor=Color.White};layout.Controls.Add(playback,0,2);BuildPlayback(playback);
         Panel banner=new Panel{Dock=DockStyle.Fill,BackColor=Color.FromArgb(233,239,249),Padding=new Padding(12)};layout.Controls.Add(banner,0,3);
         statusTitle.SetBounds(12,9,800,24);statusTitle.Font=new Font(Font.FontFamily,11,FontStyle.Bold);banner.Controls.Add(statusTitle);
-        statusHint.SetBounds(12,35,800,30);statusHint.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;statusHint.ForeColor=Muted;banner.Controls.Add(statusHint);
-        Button logToggle=new Button{Text="显示诊断日志",FlatStyle=FlatStyle.Flat,Dock=DockStyle.Left,Width=130};logToggle.FlatAppearance.BorderSize=0;layout.Controls.Add(logToggle,0,4);
+        statusHint.SetBounds(12,35,800,36);statusHint.Anchor=AnchorStyles.Top|AnchorStyles.Left|AnchorStyles.Right;statusHint.ForeColor=Muted;banner.Controls.Add(statusHint);
+        var diagnosticBar=new FlowLayoutPanel{Dock=DockStyle.Fill,Margin=Padding.Empty};Button logToggle=new Button{Text="显示诊断日志",FlatStyle=FlatStyle.Flat,Width=130,Height=26};logToggle.FlatAppearance.BorderSize=0;diagnosticBar.Controls.Add(logToggle);diagnosticButton.Text="保存诊断报告";diagnosticButton.Width=145;diagnosticButton.Height=26;diagnosticButton.Click+=(s,e)=>SaveDiagnostic(false);diagnosticBar.Controls.Add(diagnosticButton);layout.Controls.Add(diagnosticBar,0,4);
         logPanel.Dock=DockStyle.Fill;logPanel.Height=130;logPanel.Visible=false;layout.Controls.Add(logPanel,0,5);
         details.Dock=DockStyle.Fill;details.ReadOnly=true;details.Multiline=true;details.ScrollBars=ScrollBars.Vertical;details.Font=new Font("Consolas",9);logPanel.Controls.Add(details);
         logToggle.Click+=(s,e)=>{logPanel.Visible=!logPanel.Visible;logToggle.Text=logPanel.Visible?"隐藏诊断日志":"显示诊断日志";};
         retry.Interval=1200;retry.Tick+=(s,e)=>{retry.Stop();Discover(false,null);};
         watcher.Changed+=()=>Post(ScheduleDeviceScan);
-        controller.Changed+=()=>{UpdateControls();UpdateTray();TryResumeSpeaker();FinishReconnect();FinishExit();};
-        controller.Error+=message=>{Log(message);statusTitle.Text="资源连接失败";statusHint.Text=message;};
+        watcher.Warning+=message=>Post(()=>Log(message));
+        controller.Changed+=()=>{ClearFailedChoices();UpdateControls();UpdateTray();TryResumeSpeaker();FinishReconnect();FinishExit();};
+        controller.Error+=message=>{lastFailure=message;Log(message);UpdateControls();SaveDiagnostic(true);};
         InitializeTray();
         Shown+=(s,e)=>{Discover(false,()=>{try{watcher.Start();}catch(Exception error){Log(error.Message);}if(autoDevice!=null){Select(device,autoDevice);suppress=true;cameraChoice.Checked=autoMeeting;micChoice.Checked=autoMeeting&&!cameraOnly;speakerChoice.Checked=!autoMeeting;suppress=false;StartPlayback();}});};
         FormClosing+=(s,e)=>{if(e.CloseReason==CloseReason.UserClosing&&!exitRequested){e.Cancel=true;HideToTray();return;}if(controller.Busy){e.Cancel=true;RequestExit();return;}retry.Stop();watcher.Dispose();if(tray!=null){tray.Visible=false;tray.Dispose();}};
@@ -108,7 +110,7 @@ sealed class MainForm : Form {
         try{Directory.CreateDirectory(Path.GetDirectoryName(settingsFile));File.AppendAllText(Path.Combine(Path.GetDirectoryName(settingsFile),"session.log"),DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss ")+message+Environment.NewLine);}catch(IOException){}catch(UnauthorizedAccessException){}
 
     }
-    void SetState(PlaybackState value,string message){statusTitle.Text=value==PlaybackState.Failed?"连接失败":"设备待命";statusHint.Text=message;UpdateControls();}
+    void SetState(PlaybackState value,string message){if(value==PlaybackState.Failed)lastFailure=message;statusTitle.Text=value==PlaybackState.Failed?"连接失败":"设备待命";statusHint.Text=message;UpdateControls();}
     void UpdateControls(){
         bool busy=controller!=null&&controller.Busy;
         device.Enabled=!busy&&!scanning&&!reconnecting;reconnectButton.Enabled=!scanning&&!reconnecting;reconnectButton.Text=reconnecting?"正在重新连接…":"重新连接";
@@ -118,11 +120,18 @@ sealed class MainForm : Form {
         micOutput.Enabled=HasMicOutput()&&(controller==null||!controller.Active(PhoneResource.Microphone));
         Device selected=device.SelectedItem as Device;start.Enabled=!scanning&&!reconnecting&&selected!=null&&selected.Ready;
         start.Text="应用资源选择";
-        if(controller!=null){statusTitle.Text=busy?"手机资源正在使用":"待机 · 采集已停止";statusHint.Text="扬声器："+controller.Status(PhoneResource.Speaker)+"   摄像头："+controller.Status(PhoneResource.Camera)+"   麦克风："+controller.Status(PhoneResource.Microphone);}
+        if(controller!=null){statusTitle.Text=lastFailure!=null?(busy?"部分资源正在使用 · 有资源失败":"资源连接失败"):busy?"手机资源正在使用":"待机 · 采集已停止";statusHint.Text=lastFailure??("扬声器："+controller.Status(PhoneResource.Speaker)+"   摄像头："+controller.Status(PhoneResource.Camera)+"   麦克风："+controller.Status(PhoneResource.Microphone));}
+    }
+    void ClearFailedChoices(){bool previous=suppress;suppress=true;try{if(controller.Status(PhoneResource.Speaker)=="失败")speakerChoice.Checked=false;if(controller.Status(PhoneResource.Camera)=="失败")cameraChoice.Checked=false;if(controller.Status(PhoneResource.Microphone)=="失败")micChoice.Checked=false;}finally{suppress=previous;}}
+    void SaveDiagnostic(bool automatic){
+        if(reporting||automatic&&autoReportClock.IsRunning&&autoReportClock.ElapsedMilliseconds<60000)return;
+        if(automatic)autoReportClock.Restart();reporting=true;diagnosticButton.Enabled=false;diagnosticButton.Text="正在保存…";
+        var state=new Dictionary<string,string>();foreach(PhoneResource key in Enum.GetValues(typeof(PhoneResource)))state[key.ToString()]=controller.Status(key);string failure=lastFailure;
+        ThreadPool.QueueUserWorkItem(_=>{string message;try{message="诊断报告已保存："+DiagnosticReport.Save(adb.Root,state,failure,()=>Volatile.Read(ref exitRequested));}catch(Exception error){message="无法保存诊断报告："+error.Message;}Post(()=>{reporting=false;diagnosticButton.Enabled=true;diagnosticButton.Text="保存诊断报告";Log(message);if(!automatic)statusHint.Text=message;});});
     }
     void ReconnectDevices(){
         if(exitRequested||scanning||reconnecting)return;
-        reconnecting=true;reconnectScanStarted=false;retry.Stop();scanAgain=false;
+        reconnecting=true;reconnectScanStarted=false;retry.Stop();scanAgain=false;lastFailure=null;
         Log("重新连接：关闭当前资源，清理后重新检查 USB 设备；资源保持待命。");
         StopPlayback();FinishReconnect();UpdateControls();
     }
@@ -148,7 +157,7 @@ sealed class MainForm : Form {
     void StartPlayback(){
         if(exitRequested||scanning||reconnecting)return;Device selected=device.SelectedItem as Device;
         if(selected==null||!selected.Ready){SetState(PlaybackState.Failed,"请选择已授权的手机。");return;}
-        started=true;lastDevice=selected.Serial;savedRotation=Rotations[orientation.SelectedIndex];savedFacing=facing.SelectedIndex;savedMirror=mirrorChoice.Checked;SaveSettings();
+        started=true;lastFailure=null;lastDevice=selected.Serial;savedRotation=Rotations[orientation.SelectedIndex];savedFacing=facing.SelectedIndex;savedMirror=mirrorChoice.Checked;SaveSettings();
         foreach(PhoneResource key in Enum.GetValues(typeof(PhoneResource))){bool enabled=key==PhoneResource.Speaker?speakerChoice.Checked:key==PhoneResource.Camera?cameraChoice.Checked:micChoice.Checked;ResourceOptions options=Options(selected,key);if(enabled){try{options.Validate();}catch(Exception error){Log(error.Message);continue;}}controller.Set(key,enabled,options);}
         UpdateControls();UpdateTray();
     }
