@@ -43,6 +43,26 @@
 
 结论：该手机有原生 UVC 路线的服务组件，且内核配置包含相关 UVC gadget 支持，但这不代表 USB HAL、设置入口和实际输出全部可用。暂不能确认其可用，也不能因属性为空就认定完全不支持。下一步以用户可见的 Webcam 设置入口和 Windows 是否枚举到 UVC 相机作为实机证据。
 
+### USB 设置菜单追查
+
+用户确认未找到 Webcam，只看到 WebView。WebView 是网页显示组件，并非 USB 摄像头入口。
+
+已查阅 LineageOS `lineage-23.2` 分支代码：
+
+1. `UsbDetailsFunctionsController` 明确包含 `FUNCTION_UVC`，但会移除 `areFunctionsSupported()` 返回 false 的选项。
+2. `UsbBackend` 用 `UsbManager.isUvcSupportEnabled()` 判断 UVC；未启用时将该功能从支持列表排除。
+3. `UsbManager.isUvcSupportEnabled()` 读取 `SystemProperties.getBoolean("ro.usb.uvc.enabled", false)`，缺省值是 false。
+
+结合用户看到的菜单与先前读到的空属性，推断该 ROM 没有向设置公开启用 UVC，菜单缺失有源码依据，不是把 WebView 认作 Webcam 即可解决。shell 可能受系统属性读取权限限制；没有反编译这台手机的实际 Settings/framework，也没有验证其构建提交与远端分支完全一致，因此不能仅凭 shell 空值把这个推断升级成硬件不支持的结论。
+
+本次重新探测 ADB shell 读取超时，未通过改属性、root、刷机或强制切换 USB 功能继续试验。原生 UVC 暂不作为 PocketLink 的通用默认后端，后续优先调查独立 Windows 虚拟摄像头原型。
+
+源码：
+
+- [LineageOS UsbDetailsFunctionsController](https://github.com/LineageOS/android_packages_apps_Settings/blob/lineage-23.2/src/com/android/settings/connecteddevice/usb/UsbDetailsFunctionsController.java)
+- [LineageOS UsbBackend](https://github.com/LineageOS/android_packages_apps_Settings/blob/lineage-23.2/src/com/android/settings/connecteddevice/usb/UsbBackend.java)
+- [LineageOS UsbManager](https://github.com/LineageOS/android_frameworks_base/blob/lineage-23.2/core/java/android/hardware/usb/UsbManager.java)
+
 Windows 路线：优先调查 Media Foundation 软件虚拟摄像头及自定义媒体源。官方示例的最低版本是 Windows 11 build 22000。它仍需要实现 COM 媒体源、帧格式协商、时间戳、帧请求和清理，不是调用一个注册函数就能把任意字节流当摄像头。
 
 下一阶段最小原型应优先选择仅当前用户、仅当前会话的虚拟摄像头生命周期，退出时释放并移除实验设备；媒体源的 COM 部署与清理也必须单独验证。接口支持当前用户范围不代表所有部署步骤天然无需系统配置。
