@@ -28,6 +28,7 @@ static class Program {
     static void SelfTest() {
         ControllerTests.Run();
         AudioDeviceTests.Run();
+        CameraPipelineTests.Run();
         try { Pcm.ReadExact(new MemoryStream(new byte[3]),new byte[4]);throw new Exception("Truncated stream accepted"); }catch(EndOfStreamException){}
         var devices=Adb.ParseDevices("List of devices attached\r\nleft device model:Honor\r\nright unauthorized\r\nthird offline\r\n");
         if(devices.Count!=3||!devices[0].Ready||devices[1].Ready||devices[2].Ready)throw new Exception("Device authorization states lost");
