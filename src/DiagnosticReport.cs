@@ -14,6 +14,7 @@ static class DiagnosticReport {
         if(canceled!=null&&canceled())throw new OperationCanceledException();
         var adb=new Adb(root);var report=new Dictionary<string,object>();
         report["schema"]=1;report["createdUtc"]=DateTime.UtcNow.ToString("o");report["resources"]=state;report["lastFailure"]=failure;report["mediaRecorded"]=false;
+        report["blockedResources"]=ResourceSafety.Snapshot();
         report["windows"]=Attempt(()=>{using(var key=Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion")){return new{build=key.GetValue("CurrentBuild"),revision=key.GetValue("UBR"),release=key.GetValue("DisplayVersion"),logicalProcessors=Environment.ProcessorCount};}});
         report["projectCommit"]=Version("git","-C "+Adb.Q(root)+" rev-parse --short HEAD",canceled);
         report["adb"]=Version(adb.Exe,"-P 15037 version",canceled);report["phones"]=Attempt(()=>adb.Devices(canceled).Select(x=>new{model=x.Description,state=x.State,serialSuffix=x.Serial.Length>4?x.Serial.Substring(x.Serial.Length-4):x.Serial}).ToArray());
