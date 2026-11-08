@@ -26,6 +26,23 @@
 
 原生 UVC 路线：暂不能作为当前荣耀机型的默认方案。还需要检查手机 USB 设置是否提供“网络摄像头”选项；若用户连接 LineageOS 手机，再运行同一只读探测。Android 版本号本身不足以证明支持。
 
+### 第二台手机：LineageOS 补充检查
+
+2026-11-08 用户换接 PJX110 后，只读检查得到：
+
+| 项目 | 结果 |
+| --- | --- |
+| 型号 / 系统 | PJX110 / Android 16 / LineageOS 23.2 |
+| DeviceAsWebcam 包 | `com.android.DeviceAsWebcam` 存在，系统包，版本 16，用户 0 已安装且未禁用 |
+| `ro.usb.uvc.enabled` | 空值 |
+| 当前 `sys.usb.config` | `adb`，当前没有 UVC |
+| 内核只读配置 | `CONFIG_USB_F_UVC=y`、`CONFIG_USB_CONFIGFS=y`、`CONFIG_USB_CONFIGFS_F_UVC=y`，UVC gadget 相关支持已编译 |
+| USB 配置目录读取 | shell 权限不足，未尝试 root 或修改权限 |
+| `cmd usb get-functions` | 此 ROM 未实现该 shell 命令，不能据此判断 UVC 支持情况 |
+| 实机菜单与视频输出 | 检查时手机锁屏，已请用户查看 USB 用途是否有 Webcam；尚未切换或验收 |
+
+结论：该手机有原生 UVC 路线的服务组件，且内核配置包含相关 UVC gadget 支持，但这不代表 USB HAL、设置入口和实际输出全部可用。暂不能确认其可用，也不能因属性为空就认定完全不支持。下一步以用户可见的 Webcam 设置入口和 Windows 是否枚举到 UVC 相机作为实机证据。
+
 Windows 路线：优先调查 Media Foundation 软件虚拟摄像头及自定义媒体源。官方示例的最低版本是 Windows 11 build 22000。它仍需要实现 COM 媒体源、帧格式协商、时间戳、帧请求和清理，不是调用一个注册函数就能把任意字节流当摄像头。
 
 下一阶段最小原型应优先选择仅当前用户、仅当前会话的虚拟摄像头生命周期，退出时释放并移除实验设备；媒体源的 COM 部署与清理也必须单独验证。接口支持当前用户范围不代表所有部署步骤天然无需系统配置。
