@@ -20,6 +20,7 @@ static class AudioRouting {
         try{Marshal.ThrowExceptionForHR(enumerator.GetDefaultAudioEndpoint(0,0,out device));string id;Marshal.ThrowExceptionForHR(device.GetId(out id));string guid=id.Substring(id.LastIndexOf('{'));using(var properties=Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\MMDevices\Audio\Render\"+guid+@"\Properties")){return properties==null?id:(properties.GetValue("{a45c254e-df1c-4efd-8020-67d146a850e0},14") as string)??(properties.GetValue("{a45c254e-df1c-4efd-8020-67d146a850e0},2") as string)??id;}}
         finally{if(device!=null)Marshal.ReleaseComObject(device);Marshal.ReleaseComObject(enumerator);}
     }
+    public static string DefaultPlaybackId(){var enumerator=(IEnum)new Enumerator();IDevice device=null;try{Marshal.ThrowExceptionForHR(enumerator.GetDefaultAudioEndpoint(0,0,out device));string id;Marshal.ThrowExceptionForHR(device.GetId(out id));return id;}finally{if(device!=null)Marshal.ReleaseComObject(device);Marshal.ReleaseComObject(enumerator);}}
     public static void EnsureSpeakerIsolation(){string output=DefaultPlayback();if(IsMicrophoneBus(output))throw new InvalidOperationException("当前 Windows 默认输出是 VB-CABLE 麦克风通道，会造成回声。请在 Windows 声音设置中把输出改为显示器或耳机；会议麦克风保留 CABLE Output，会议扬声器也选择显示器或耳机。");}
 }
 

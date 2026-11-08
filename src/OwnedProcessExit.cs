@@ -18,6 +18,6 @@ static class OwnedProcessExit {
             if(title.ToString().IndexOf("OBS",StringComparison.OrdinalIgnoreCase)>=0){posted=PostMessage(window,0x10,IntPtr.Zero,IntPtr.Zero);log("请求关闭专用 OBS 窗口："+kind+" / "+title);return !posted;}return true;
         },IntPtr.Zero);
         if(posted&&process.WaitForExit(3000))return;
-        if(!process.HasExited){log("专用 OBS 未正常退出，结束本程序启动的实例。");process.Kill();process.WaitForExit(3000);}
+        if(!process.HasExited){log("专用 OBS 未正常退出，结束本程序启动的实例。");OwnedProcessTree.Kill(process);}
     }
 }
