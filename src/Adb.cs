@@ -23,10 +23,10 @@ sealed class Adb {
         p.RedirectStandardOutput=true; p.RedirectStandardError=true; p.EnvironmentVariables["ADB_LIBUSB"]="1";
         Process proc=Process.Start(p); return proc;
     }
-    public string Run(string args,Func<bool> canceled=null) {
+    public string Run(string args,Func<bool> canceled=null,int timeout=15000) {
         if(canceled!=null&&canceled())throw new OperationCanceledException();
         using(Process p=Spawn(args)) {
-            ProcessOutput result=ProcessRunner.Run(p,15000,canceled);
+            ProcessOutput result=ProcessRunner.Run(p,timeout,canceled);
             if(result.ExitCode!=0)throw new IOException("ADB 执行失败："+result.Error+result.Output);return result.Output;
         }
     }

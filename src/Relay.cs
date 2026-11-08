@@ -13,10 +13,10 @@ sealed class Relay:ISpeakerRelay {
     Process player;string serial;bool mapped;
     readonly List<TcpClient> sockets=new List<TcpClient>();
     readonly List<TcpListener> listeners=new List<TcpListener>();
-    readonly string tunnel="soundlink_"+Process.GetCurrentProcess().Id;
+    static int generation;readonly string tunnel="soundlink_"+Process.GetCurrentProcess().Id+"_"+Interlocked.Increment(ref generation);
     volatile bool stopping; bool nativeInitialized;
     public event Action Connected;
-    public bool PhoneAlive{get{return player!=null&&!player.HasExited;}}
+    public bool PhoneAlive{get{try{return player!=null&&!player.HasExited;}catch(InvalidOperationException){return false;}}}
     public string Failure{get;private set;}
     public Relay(Adb a, Action<string> l) { adb=a; log=l; }
     public void Start(string device,Action ended) {
@@ -75,9 +75,10 @@ sealed class Relay:ISpeakerRelay {
     }
     void CloseIO() {TcpClient[] clients;TcpListener[] servers;lock(sockets)clients=sockets.ToArray();lock(listeners)servers=listeners.ToArray();foreach(TcpClient c in clients){try{c.Close();}catch{}}foreach(TcpListener l in servers){try{l.Stop();}catch{}}}
     void Cleanup() {
-        CloseIO(); if(nativeInitialized) { Native.AudioCapture_Cleanup(); nativeInitialized=false; }
-        if(player!=null){try{if(!player.HasExited)player.Kill();player.Dispose();}catch{}}
-        if(mapped){try{adb.Run("-s "+Adb.Q(serial)+" reverse --remove localabstract:"+tunnel);}catch{}}
+        log("扬声器清理：关闭连接");CloseIO(); if(nativeInitialized) { log("扬声器清理：释放原生采集");Native.AudioCapture_Cleanup(); nativeInitialized=false;log("扬声器清理：原生采集已释放"); }
+        log("扬声器清理：释放手机进程");if(player!=null){try{if(!player.HasExited)player.Kill();player.Dispose();}catch{}}
+        log("扬声器清理：移除 USB 映射");if(mapped){mapped=false;try{adb.Run("-s "+Adb.Q(serial)+" reverse --remove localabstract:"+tunnel,null,1000);}catch(Exception e){log("旧扬声器映射清理未完成："+e.Message);}}
+        log("扬声器清理：完成");
     }
     public void Stop() { stopping=true;CloseIO(); }
 

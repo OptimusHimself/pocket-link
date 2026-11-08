@@ -9,12 +9,13 @@ using System.Threading;
 
 static class RobustnessProbe {
     static bool cameraOnly;
+    static int pcmUpdates;
     static readonly ConcurrentQueue<Action> queue=new ConcurrentQueue<Action>();static readonly List<IntPtr> frozen=new List<IntPtr>();
     [DllImport("kernel32.dll")]static extern IntPtr OpenThread(uint access,bool inherit,uint id);
     [DllImport("kernel32.dll")]static extern uint SuspendThread(IntPtr thread);
     [DllImport("kernel32.dll")]static extern uint ResumeThread(IntPtr thread);
     [DllImport("kernel32.dll")]static extern bool CloseHandle(IntPtr handle);
-    static void Log(string value){Console.WriteLine(DateTime.Now.ToString("HH:mm:ss")+" "+value);}
+    static void Log(string value){if(value.StartsWith("传输中：",StringComparison.Ordinal))Interlocked.Increment(ref pcmUpdates);Console.WriteLine(DateTime.Now.ToString("HH:mm:ss")+" "+value);}
     static void Wait(Func<bool> condition){var watch=Stopwatch.StartNew();while(true){Action action;while(queue.TryDequeue(out action))action();if(condition())return;if(watch.ElapsedMilliseconds>45000)throw new Exception("Fault recovery timed out");Thread.Sleep(30);}}
     static List<int> Children(int parent,string name){var ids=new List<int>();using(var query=new ManagementObjectSearcher("SELECT ProcessId,Name FROM Win32_Process WHERE ParentProcessId="+parent)){using(var rows=query.Get()){foreach(ManagementObject row in rows){using(row){if(String.Equals((string)row["Name"],name,StringComparison.OrdinalIgnoreCase))ids.Add(Convert.ToInt32(row["ProcessId"]));}}}}return ids;}
     static int Owned(string name){var ids=Children(Process.GetCurrentProcess().Id,name);if(ids.Count!=1)throw new Exception("Expected one owned "+name);return ids[0];}
@@ -37,6 +38,16 @@ static class RobustnessProbe {
                 controller.Set(PhoneResource.Camera,true,Camera(phone.Serial));Wait(()=>controller.Status(PhoneResource.Camera)=="运行中");using(var obs=Process.GetProcessById(Owned("obs64.exe")))obs.Kill();Wait(()=>!controller.Active(PhoneResource.Camera));AudioRunning(controller);NoVideoProcesses();Thread.Sleep(500);if(controller.Active(PhoneResource.Camera))throw new Exception("Camera restarted without user request");Log("PASS OBS crash isolated; camera stayed off");
                 controller.Set(PhoneResource.Camera,true,Camera(phone.Serial));Wait(()=>controller.Status(PhoneResource.Camera)=="运行中");adb.Run("kill-server");Wait(()=>!controller.Busy);Wait(()=>watcher.SubscriptionProcessId!=0);Thread.Sleep(1000);Wait(()=>true);if(controller.Busy)throw new Exception("Capture restarted after transport loss");NoVideoProcesses();Log("PASS project ADB transport loss cleaned all capture; no automatic media restart");
                 if(ResourceSafety.Snapshot().ContainsKey("Speaker")){bool refused=false;try{ResourceSafety.Check(new ResourceOptions{Serial=phone.Serial,Speaker=true});}catch(InvalidOperationException){refused=true;}if(!refused)throw new Exception("Timed-out native audio engine was reusable");Log("PASS native audio timeout quarantined; application restart required");}
+                else if(!cameraOnly){
+                    for(int cycle=0;cycle<3;cycle++){
+                        Wait(()=>adb.Devices().Exists(x=>x.Serial==phone.Serial&&x.Ready));controller.Set(PhoneResource.Speaker,true,new ResourceOptions{Serial=phone.Serial,Speaker=true});
+                        Wait(()=>{if(controller.Status(PhoneResource.Speaker)=="失败")throw new Exception("Speaker reuse failed: "+lastError);return controller.Status(PhoneResource.Speaker)=="运行中";});
+                        int before=Volatile.Read(ref pcmUpdates);Thread.Sleep(5200);Wait(()=>true);if(Volatile.Read(ref pcmUpdates)<=before)throw new Exception("No sustained PCM observed after speaker restart; keep PC audio playing and repeat.");
+                        if(cycle<2)adb.Run("kill-server");else controller.Set(PhoneResource.Speaker,false,null);
+                        Wait(()=>!controller.Active(PhoneResource.Speaker));if(ResourceSafety.Snapshot().ContainsKey("Speaker"))throw new Exception("Speaker reuse poisoned the native engine");
+                        Log("PASS same-process speaker reuse cycle "+(cycle+1));
+                    }
+                }
                 var state=new Dictionary<string,string>();foreach(PhoneResource key in Enum.GetValues(typeof(PhoneResource)))state[key.ToString()]=controller.Status(key);string report=DiagnosticReport.Save(root,state,lastError);Log("REPORT "+report);Log("COMPLETE");return 0;
             }catch(Exception e){Log("FAIL "+e);return 1;}
             finally{Thaw();controller.StopAll();Wait(()=>!controller.Busy);watcher.Stop();try{adb.Run("kill-server");}catch(Exception e){Log("Test ADB cleanup: "+e.Message);}}
